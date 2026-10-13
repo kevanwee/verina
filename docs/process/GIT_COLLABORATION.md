@@ -24,3 +24,9 @@ Use scoped commits and pushes to preserve completed work. Never create an empty 
 Repository privacy does not authorize uploading confidential planning, client data, secrets or restricted reference documents. `private/` and source extracts stay local. Runtime secrets belong in a secret manager or ignored environment files. Synthetic canaries must be clearly fake, and any scanner exception must match an exact reviewed false positive rather than exempt whole files.
 
 Source publication, deployment and client-data release are different actions. A private branch can hold reviewed development work while production release remains blocked. Actual branch protection, required checks and deployment environment approvals must be recorded, not assumed.
+
+## Required reviewer and merge authority
+
+Every PR requires review by either the Scrum Master or QA, and either role may merge it after the review. Inspect the actual diff and revision-specific evidence, record the reviewer role, findings and limitations on the PR, and wait for all configured required checks to pass. Recheck material changes after review. A draft must be made ready only when its reviewed scope is ready to integrate.
+
+Agents share the authenticated publisher account. GitHub cannot treat an agent's review of that account's PR as another person's approval. Record the agent-role review honestly rather than inventing a human approver or bot identity. Branch protection enforces the configured CI checks and PR route; the role requirement is enforced through the recorded review and team procedure until distinct reviewer accounts exist. Product acceptance, a legal sign-off and production release are not conferred by merging a source PR.
