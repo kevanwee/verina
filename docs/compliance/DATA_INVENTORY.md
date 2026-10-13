@@ -96,4 +96,15 @@ The reusable SQL matter repository persists a tenant/matter-keyed current projec
 
 Access-only queries omit title/document content; requester responses remain opaque ID and coarse conflict-stage status. Canonical audit payloads still contain bounded identifiers/decision metadata and optional reason hashes, not names, reasons, titles or document text. Hashes are linkable evidence, not anonymisation.
 
-Repository restart persistence and revision protection are implemented. Completed mutation audit/outbox, durable historical record policy, authentic identity provisioning, production encryption/KMS, operational database roles/RLS, retention, backups and hold-aware deletion remain unimplemented or separately reviewed. Physical delete is a storage primitive, not an approved retention workflow. See [ADR 006](../adr/006-durable-matter-repository.md).
+Repository restart persistence and revision protection are implemented. Outbox for external side effects, durable historical record policy, authentic identity provisioning, production encryption/KMS, operational database roles/RLS, retention, backups and hold-aware deletion remain unimplemented or separately reviewed. Physical delete is a storage primitive, not an approved retention workflow. See [ADR 006](../adr/006-durable-matter-repository.md).
+
+## Atomic mutation receipts (migration 0003)
+
+When the service is composed with the SQL mutation unit of work, create, title update, conflict recording and waiver commit the matter projection change, one `matter.mutation_completed` audit event and one `matter_mutation_receipts` row in a single database transaction. Any failure before commit, including cancellation, rolls all three back.
+
+| Store | Fields | Purpose | Classification |
+| --- | --- | --- | --- |
+| `matter.mutation_completed` audit payload | tenant, actor, matter and operation IDs; action; expected/result revision; prior check version; request, before/after and result-access SHA-256 hashes; UTC time | Evidence that a specific database transition committed | Linkable metadata; no names, titles, reasons or document text |
+| `matter_mutation_receipts.result_access_json` | Minimal historical access result needed to return the exact original retry result: conflict check (including recorder profile name) and waiver (including reason) where the action produced them; membership/wall sets stripped; create/title receipts strip check/waiver state | Idempotent retry after response loss | Protected confidential business state, not audit metadata; never logged or publicly serialized |
+
+Receipts are append-only (database triggers) and persist alongside the current projection, so they duplicate some protected historical facts. A receipt never grants current authority: replay re-checks current identity, role, membership and wall before the protected column is read, and denies record/waive replays when the current check or waiver differs. No retention period, deletion of receipts/backups, hold handling, encryption or authentic lawyer identity is claimed. A consistently forged privileged database write remains outside this control. Delete and membership changes are rejected in durable-transaction mode until their outcomes are integrated.

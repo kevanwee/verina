@@ -22,7 +22,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from verina.access.domain import (
     Action,
@@ -45,11 +45,18 @@ from verina.access.domain import (
     profile_matches,
 )
 from verina.access.identity import IdentityAdapter, Principal
+from verina.access.mutations import (
+    MutationReceipt,
+    MutationReplayError,
+    SqlMatterMutationUnitOfWork,
+    request_hash,
+)
 from verina.access.policy import POLICY_VERSION, MatterAccessPolicy
 from verina.access.repository import MatterRepository, MatterRevisionConflictError
 from verina.ai.audit import AuditEmissionError, AuditSink
 from verina.ai.client import UntrustedDocument
 from verina.audit.events import AccessAuditEvent
+from verina.audit.store import TenantAuditSink
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +143,15 @@ class MatterService:
         audit_sink: AuditSink,
         review_runner: ReviewRunner,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        mutation_uow: SqlMatterMutationUnitOfWork | None = None,
     ) -> None:
+        if mutation_uow is not None and (
+            mutation_uow.repository is not repository
+            or not isinstance(audit_sink, TenantAuditSink)
+            or audit_sink._store is not mutation_uow.audit
+        ):
+            raise ValueError("durable mutation composition requires matching repository and audit")
+        self._uow = mutation_uow
         self._repo = repository
         self._policy = policy
         self._identity = identity
@@ -144,13 +159,39 @@ class MatterService:
         self._runner = review_runner
         self._clock = clock
 
-    async def create_matter(self, principal: Principal, title: str) -> MatterId:
+    async def create_matter(
+        self,
+        principal: Principal,
+        title: str,
+        *,
+        operation_id: UUID | None = None,
+        expected_revision: int | None = None,
+    ) -> MatterId:
         """Local/test synthetic foundation. Creator membership only; no HTTP wiring."""
         if not isinstance(title, str) or not 0 < len(title.strip()) <= 200:
             raise ValueError("invalid title")
+        token = self._token(operation_id, expected_revision)
+        fingerprint = request_hash(Action.CREATE_MATTER, None, title.strip())
+        replay = await self._replay(
+            principal, Action.CREATE_MATTER, token, fingerprint, None, expected_revision
+        )
+        if replay is not None:
+            return replay.matter_id
         principal = await self._authorize_collection(principal, Action.CREATE_MATTER)
         self._profile(principal)
-        matter_id = MatterId(str(uuid4()))
+        if self._uow is None:
+            self._expect(expected_revision, 0)
+        matter_id = (
+            MatterId(
+                str(
+                    uuid5(
+                        NAMESPACE_URL, f"verina:{principal.tenant_id}:{principal.actor_id}:{token}"
+                    )
+                )
+            )
+            if self._uow
+            else MatterId(str(uuid4()))
+        )
         await self._emit(principal, Action.CREATE_MATTER, matter_id.value, Decision.allow())
         principal = await self._recheck_collection(principal, Action.CREATE_MATTER)
         self._profile(principal)
@@ -158,11 +199,27 @@ class MatterService:
             MatterAccess(principal.tenant_id, matter_id, members=frozenset({principal.actor_id})),
             MatterContent(title.strip()),
         )
+        if self._uow:
+            return self._commit(
+                principal,
+                Action.CREATE_MATTER,
+                token,
+                fingerprint,
+                record,
+                None,
+                requested_revision=expected_revision,
+            ).matter_id
         self._repo.add(principal.tenant_id, record)
         return matter_id
 
     async def record_conflict_check(
-        self, principal: Principal, matter_id: str, result: ConflictStatus
+        self,
+        principal: Principal,
+        matter_id: str,
+        result: ConflictStatus,
+        *,
+        operation_id: UUID | None = None,
+        expected_revision: int | None = None,
     ) -> ConflictCheckRecord:
         """Record a lawyer's synthetic result, replacing and invalidating any old waiver."""
         if type(result) is not ConflictStatus or result not in {
@@ -170,9 +227,25 @@ class MatterService:
             ConflictStatus.CONFLICT,
         }:
             raise ValueError("invalid conflict result")
+        token = self._token(operation_id, expected_revision)
+        fingerprint = request_hash(Action.RECORD_CONFLICT_CHECK, matter_id, result.value)
+        replay = await self._replay(
+            principal,
+            Action.RECORD_CONFLICT_CHECK,
+            token,
+            fingerprint,
+            matter_id,
+            expected_revision,
+        )
+        if replay is not None:
+            if replay.result_access.conflict_check is None:
+                raise MutationReplayError()
+            return replay.result_access.conflict_check
         principal, access = await self._authorize(
             principal, Action.RECORD_CONFLICT_CHECK, matter_id
         )
+        if self._uow is None:
+            self._expect(expected_revision, access.revision)
         profile = self._profile(principal)
         previous = access.conflict_check
         if previous is not None and (
@@ -193,8 +266,161 @@ class MatterService:
             conflict_check=check,
             waiver=None,
         )
+        if self._uow:
+            result_access = self._commit(
+                principal,
+                Action.RECORD_CONFLICT_CHECK,
+                token,
+                fingerprint,
+                replace(record, access=new_access),
+                access,
+                requested_revision=expected_revision,
+            )
+            if result_access.conflict_check is None:
+                raise MutationReplayError()
+            return result_access.conflict_check
         self._persist(principal, replace(record, access=new_access))
         return check
+
+    def _token(self, operation_id: UUID | None, expected_revision: int | None) -> UUID:
+        if self._uow is None and (operation_id is not None or expected_revision is not None):
+            raise ValueError("durable mutation port required")
+        if operation_id is not None and not isinstance(operation_id, UUID):
+            raise ValueError("invalid operation id")
+        if expected_revision is not None and (
+            type(expected_revision) is not int or expected_revision < 0
+        ):
+            raise MutationReplayError()
+        return operation_id or uuid4()
+
+    @staticmethod
+    def _expect(expected: int | None, actual: int) -> None:
+        if expected is not None and expected != actual:
+            raise AccessDenied(ReasonCode.MATTER_CHANGED)
+
+    async def _replay(
+        self,
+        principal: Principal,
+        action: Action,
+        token: UUID,
+        fingerprint: str,
+        matter_id: str | None,
+        expected_revision: int | None,
+        *,
+        reason: str | None = None,
+    ) -> MutationReceipt | None:
+        if self._uow is None:
+            return None
+        principal = await self._refresh(principal, action, matter_id)
+        receipt = self._uow.peek(principal.tenant_id, token)
+        if receipt is None:
+            return None
+        if (
+            receipt.actor_id != principal.actor_id
+            or receipt.action is not action
+            or (matter_id is not None and receipt.matter_id != MatterId.parse(matter_id))
+        ):
+            raise MutationReplayError()
+        if action is Action.CREATE_MATTER:
+            principal = await self._authorize_collection(principal, action)
+            self._profile(principal)
+            principal, access = await self._authorize(
+                principal, Action.READ_STATUS, receipt.matter_id.value
+            )
+            await self._emit(principal, action, receipt.matter_id.value, Decision.allow())
+            principal, access = await self._authorize(
+                principal, Action.READ_STATUS, receipt.matter_id.value
+            )
+        else:
+            principal, access = await self._authorize(
+                principal, action, receipt.matter_id.value, reason=reason, completed_replay=True
+            )
+        self._uow.validate_replay(
+            receipt,
+            principal,
+            action,
+            receipt.matter_id,
+            fingerprint,
+            receipt.expected_revision if expected_revision is None else expected_revision,
+        )
+        try:
+            receipt = self._uow.load_authorized(
+                principal.tenant_id,
+                token,
+                access,
+                self._mutation_authorizer(principal, action, reason),
+            )
+        except MatterRevisionConflictError:
+            raise AccessDenied(ReasonCode.CONFLICT_CHANGED) from None
+        if action in {Action.RECORD_CONFLICT_CHECK, Action.WAIVE_CONFLICT} and (
+            access.conflict_check,
+            access.waiver,
+            access.conflict_status,
+        ) != (
+            receipt.result_access.conflict_check,
+            receipt.result_access.waiver,
+            receipt.result_access.conflict_status,
+        ):
+            await self._emit(
+                principal,
+                action,
+                receipt.matter_id.value,
+                Decision.deny(ReasonCode.CONFLICT_CHANGED),
+            )
+            raise AccessDenied(ReasonCode.CONFLICT_CHANGED)
+        return receipt
+
+    def _commit(
+        self,
+        principal: Principal,
+        action: Action,
+        token: UUID,
+        fingerprint: str,
+        record: MatterRecord,
+        expected_access: MatterAccess | None,
+        *,
+        reason: str | None = None,
+        requested_revision: int | None = None,
+    ) -> MatterAccess:
+        if self._uow is None:
+            raise ValueError("durable mutation port required")
+
+        try:
+            return self._uow.put(
+                principal,
+                action,
+                token,
+                fingerprint,
+                record,
+                expected_access,
+                self._mutation_authorizer(principal, action, reason),
+                requested_revision=requested_revision,
+            ).result_access
+        except MatterRevisionConflictError:
+            raise AccessDenied(ReasonCode.MATTER_CHANGED) from None
+
+    def _mutation_authorizer(
+        self, principal: Principal, action: Action, reason: str | None
+    ) -> Callable[[MatterAccess | None, bool], None]:
+        def authorize(access: MatterAccess | None, replayed: bool) -> None:
+            current = self._identity.current(principal.tenant_id, principal.actor_id)
+            if current is None:
+                raise AccessDenied(ReasonCode.UNAUTHENTICATED)
+            decision = self._named_decision(
+                current,
+                action,
+                self._policy.decide(
+                    current, action, access, reason=reason, completed_replay=replayed
+                ),
+            )
+            if not decision.allowed:
+                raise AccessDenied(decision.reason_code)
+            if replayed and action is Action.CREATE_MATTER:
+                visibility = self._policy.decide(current, Action.READ_STATUS, access)
+                if not visibility.allowed:
+                    raise AccessDenied(visibility.reason_code)
+
+        return authorize
 
     def _named_decision(self, principal: Principal, action: Action, decision: Decision) -> Decision:
         if decision.allowed and action in {
@@ -263,15 +489,47 @@ class MatterService:
 
     # -------------------------------------------------------------- mutations
 
-    async def update_title(self, principal: Principal, matter_id: str, title: str) -> None:
+    async def update_title(
+        self,
+        principal: Principal,
+        matter_id: str,
+        title: str,
+        *,
+        operation_id: UUID | None = None,
+        expected_revision: int | None = None,
+    ) -> None:
         if not title.strip():
             raise ValueError("title required")
+        token = self._token(operation_id, expected_revision)
+        fingerprint = request_hash(Action.UPDATE_MATTER, matter_id, title.strip())
+        if (
+            await self._replay(
+                principal, Action.UPDATE_MATTER, token, fingerprint, matter_id, expected_revision
+            )
+            is not None
+        ):
+            return
         principal, access = await self._authorize(principal, Action.UPDATE_MATTER, matter_id)
+        if self._uow is None:
+            self._expect(expected_revision, access.revision)
         record = self._content(principal, access)
         new = replace(record, content=replace(record.content, title=title.strip()))
-        self._persist(principal, new)
+        if self._uow:
+            self._commit(
+                principal,
+                Action.UPDATE_MATTER,
+                token,
+                fingerprint,
+                new,
+                access,
+                requested_revision=expected_revision,
+            )
+        else:
+            self._persist(principal, new)
 
     async def delete_matter(self, principal: Principal, matter_id: str) -> None:
+        if self._uow:
+            raise ValueError("delete outcome is not integrated")
         principal, access = await self._authorize(principal, Action.DELETE_MATTER, matter_id)
         if not self._repo.delete(
             principal.tenant_id, access.matter_id, expected_revision=access.revision
@@ -281,6 +539,8 @@ class MatterService:
     async def grant_membership(
         self, principal: Principal, matter_id: str, target_actor: str
     ) -> None:
+        if self._uow:
+            raise ValueError("membership outcome is not integrated")
         target = ActorId.parse(target_actor)
         principal, access = await self._authorize(
             principal, Action.MANAGE_MEMBERSHIP, matter_id, target_actor=target
@@ -293,12 +553,37 @@ class MatterService:
         )
 
     async def waive_conflict(
-        self, principal: Principal, matter_id: str, reason: str
+        self,
+        principal: Principal,
+        matter_id: str,
+        reason: str,
+        *,
+        operation_id: UUID | None = None,
+        expected_revision: int | None = None,
     ) -> ConflictWaiver:
         """Member-lawyer waiver: any lawyer with matter membership, mandatory reason, audited."""
+        token = self._token(operation_id, expected_revision)
+        if not isinstance(reason, str):
+            raise ValueError("invalid reason")
+        fingerprint = request_hash(Action.WAIVE_CONFLICT, matter_id, reason.strip())
+        replay = await self._replay(
+            principal,
+            Action.WAIVE_CONFLICT,
+            token,
+            fingerprint,
+            matter_id,
+            expected_revision,
+            reason=reason,
+        )
+        if replay is not None:
+            if replay.result_access.waiver is None:
+                raise MutationReplayError()
+            return replay.result_access.waiver
         principal, access = await self._authorize(
             principal, Action.WAIVE_CONFLICT, matter_id, reason=reason
         )
+        if self._uow is None:
+            self._expect(expected_revision, access.revision)
         profile = self._profile(principal)
         check = access.conflict_check
         if check is None:
@@ -317,6 +602,20 @@ class MatterService:
         )
         record = self._content(principal, access)
         new_access = replace(access, conflict_status=ConflictStatus.WAIVED, waiver=waiver)
+        if self._uow:
+            result_access = self._commit(
+                principal,
+                Action.WAIVE_CONFLICT,
+                token,
+                fingerprint,
+                replace(record, access=new_access),
+                access,
+                reason=reason,
+                requested_revision=expected_revision,
+            )
+            if result_access.waiver is None:
+                raise MutationReplayError()
+            return result_access.waiver
         self._persist(principal, replace(record, access=new_access))
         return waiver
 
@@ -400,13 +699,19 @@ class MatterService:
         *,
         reason: str | None = None,
         target_actor: ActorId | None = None,
+        completed_replay: bool = False,
     ) -> tuple[Principal, MatterAccess]:
         parsed = MatterId.parse(matter_id)
         requested = parsed.value if parsed is not None else None  # never log raw input
         principal = await self._refresh(principal, action, requested)
         access = self._repo.get_access(principal.tenant_id, parsed) if parsed else None
         decision = self._policy.decide(
-            principal, action, access, reason=reason, target_actor=target_actor
+            principal,
+            action,
+            access,
+            reason=reason,
+            target_actor=target_actor,
+            completed_replay=completed_replay,
         )
         decision = self._named_decision(principal, action, decision)
         same_actor = (
@@ -434,7 +739,12 @@ class MatterService:
             raise AccessDenied(ReasonCode.UNAUTHENTICATED)
         fresh = self._repo.get_access(current.tenant_id, parsed) if parsed else None
         final = self._policy.decide(
-            current, action, fresh, reason=reason, target_actor=target_actor
+            current,
+            action,
+            fresh,
+            reason=reason,
+            target_actor=target_actor,
+            completed_replay=completed_replay,
         )
         final = self._named_decision(current, action, final)
         if (

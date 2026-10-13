@@ -129,6 +129,7 @@ class MatterAccessPolicy:
         *,
         reason: str | None = None,
         target_actor: ActorId | None = None,
+        completed_replay: bool = False,
     ) -> Decision:
         if not isinstance(principal, Principal):
             return Decision.deny(ReasonCode.UNAUTHENTICATED)
@@ -155,9 +156,13 @@ class MatterAccessPolicy:
 
         if action in CONFLICT_GATED and not conflict_is_ready(matter):
             return Decision.deny(ReasonCode.CONFLICT_NOT_CLEARED)
-        if action is Action.WAIVE_CONFLICT and (
-            matter.conflict_status is not ConflictStatus.CONFLICT
-            or not conflict_record_is_valid(matter)
+        if (
+            action is Action.WAIVE_CONFLICT
+            and not completed_replay
+            and (
+                matter.conflict_status is not ConflictStatus.CONFLICT
+                or not conflict_record_is_valid(matter)
+            )
         ):
             return Decision.deny(ReasonCode.CONFLICT_NOT_WAIVABLE)
 
