@@ -1,0 +1,64 @@
+# Verina project Semgrep rules (EN-2, control C-12.2). Run offline: no registry rules, no metrics.
+#   semgrep scan --config .semgrep/ --error --metrics=off
+# Owners: verina-qa (wiring) + verina-security (rule content).
+rules:
+  - id: verina-model-sdk-outside-orchestrator-py
+    # Threat ORC-1 / control C-7.1: model calls only through apps/api/src/verina/ai/.
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Model SDK imported outside the orchestrator (apps/api/src/verina/ai/). All model calls
+      must go through the orchestrator so redaction and audit logging apply (ORC-1).
+    pattern-either:
+      - pattern: import anthropic
+      - pattern: import openai
+      - pattern: import litellm
+      - pattern: import mistralai
+      - pattern: import cohere
+      - pattern: import vertexai
+      - pattern: from anthropic import $X
+      - pattern: from openai import $X
+      - pattern: from litellm import $X
+      - pattern: from google import genai
+      - pattern: from google import generativeai
+      - pattern-regex: >-
+          (?m)^[ \t]*(from\s+|import\s+([\w.]+\s*(as\s+\w+\s*)?,\s*)*)(anthropic|openai|litellm|mistralai|cohere|vertexai|google\.genai|google\.generativeai|langchain\w*)\b
+      - pattern-regex: >-
+          (import_module|__import__)\(\s*['"](anthropic|openai|litellm|mistralai|cohere|vertexai|google\.genai|google\.generativeai|langchain\w*)\b
+    paths:
+      exclude:
+        - apps/api/src/verina/ai/
+        - "**/.venv/**"
+        # Guard + self-test hold SDK import strings as test data.
+        - scripts/guard.py
+        - apps/api/tests/test_guard.py
+
+  - id: verina-model-sdk-in-web
+    # The browser/Next.js app must never call a model provider directly (ORC-1).
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Model SDK imported in web code. The web app talks only to the Verina API; model calls
+      belong in apps/api/src/verina/ai/ (ORC-1).
+    # Mirrors JS_MODEL_SDK in scripts/guard.py (subpaths and side-effect imports included).
+    pattern-regex: >-
+      (from\s+|require\(\s*|import\(\s*|(?m:^)\s*import\s+)['"](@anthropic-ai/[^'"]+|openai|@google/genai|@google/generative-ai|@ai-sdk/[^'"]+|ai)(/[^'"]*)?['"]
+    paths:
+      exclude:
+        - "**/node_modules/**"
+
+  - id: verina-dangerously-set-inner-html
+    # Threat WEB-2: untrusted text must render as text. Exceptions need an allow-listed sanitiser
+    # and a `// nosemgrep: verina-dangerously-set-inner-html` with a reason, reviewed by security.
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML renders HTML. Document text, model output and comments are
+      untrusted (WEB-2). Render as text or sanitise with the approved sanitiser and get a
+      security review.
+    pattern-regex: >-
+      dangerouslySetInnerHTML
+    paths:
+      exclude:
+        - "**/node_modules/**"
+        - "**/.next/**"

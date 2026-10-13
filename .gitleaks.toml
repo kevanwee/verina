@@ -1,0 +1,18 @@
+# Gitleaks config (EN-2). Default ruleset plus narrow, reviewed allowlist entries.
+# Policy: allowlist an exact false-positive *secret string* only, never a whole path or file type.
+# Every entry needs a one-line reason. Changes are reviewed by verina-security (CODEOWNERS, S1).
+
+title = "verina"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Prose false positives from the generic-api-key rule (reviewed 2026-10-13, verina-qa)"
+regexTarget = "secret"
+regexes = [
+  # .claude/skills/lq-local-first-legal-workspace/SKILL.md: "credentials are found, marketing/privacy ..."
+  '''^marketing/privacy$''',
+  # docs/security/THREAT_MODEL.md asset table: "IdP secrets, M365/DocuSign tokens"
+  '''^M365/DocuSign$''',
+]
