@@ -48,6 +48,7 @@ Thumbs.db
 # Local SQLite databases (unit/dev only)
 *.db
 *.sqlite3
+.data/
 
 # Impeccable local questions, detector state and review screenshots (regenerated)
 apps/web/.impeccable/

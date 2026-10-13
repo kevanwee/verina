@@ -15,6 +15,10 @@ dependencies = [
   "pydantic-settings>=2.15,<3",
   "httpx>=0.28,<0.29",
   "anthropic>=1.13,<2",
+  # Durable audit store (EN-8, ADR 004): SQLite locally, PostgreSQL in CI.
+  "sqlalchemy>=2.0.40,<2.1",
+  "alembic>=1.16,<2",
+  "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +38,13 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-verina = ["py.typed", "ai/templates/*.toml"]
+verina = [
+  "py.typed",
+  "ai/templates/*.toml",
+  "db/migrations/*.py",
+  "db/migrations/script.py.mako",
+  "db/migrations/versions/*.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -61,6 +71,8 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# Alembic revision files are named by revision id, not as importable modules.
+"src/verina/db/migrations/versions/*" = ["N999"]
 
 [tool.mypy]
 python_version = "3.12"
