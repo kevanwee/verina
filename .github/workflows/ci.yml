@@ -1,0 +1,156 @@
+# Verina CI (EN-2). Local equivalent: scripts/check.sh (POSIX) or scripts/check.ps1 (Windows).
+# Design notes: docs/testing/TEST_STRATEGY.md section "CI pipeline".
+#
+# Supply-chain rules (threat SC-5, control C-12.2):
+#   - Every third-party action is pinned to a full commit SHA (tag in the trailing comment).
+#   - Workflow token is read-only; no job requests write scopes.
+#   - No secrets are referenced, so fork PRs get nothing of value.
+#   - checkout never persists the token into .git/config.
+name: ci
+
+on:
+  push:
+    branches: [main, "us-**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # REVIEWS.md R-001 item 7: never let the Impeccable hook try to download a binary in CI.
+  IMPECCABLE_HOOK_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+
+jobs:
+  guard:
+    name: guard (private/, secrets files, hooks, ORC-1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Repository guard
+        run: python scripts/guard.py
+
+  api:
+    name: api (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff lint
+        run: python -m ruff check . && python -m ruff check --config pyproject.toml ../../scripts
+      - name: Ruff format check
+        run: python -m ruff format --check . && python -m ruff format --config pyproject.toml --check ../../scripts
+      - name: Mypy (strict)
+        run: python -m mypy
+      - name: Pytest + coverage (fail under 85%, see [tool.coverage.report])
+        run: python -m pytest --cov --cov-report=term-missing --cov-report=xml
+
+  web:
+    name: web (Node 24)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install (lockfile only)
+        run: npm ci
+      - name: Lint
+        run: npm run lint:web
+      - name: Type-check
+        run: npm run typecheck:web
+      - name: Unit tests (Vitest)
+        run: npm run test:web
+      - name: Production build
+        run: npm run build:web
+
+  security:
+    name: security (gitleaks, npm audit, pip-audit, bandit, semgrep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, recorded 2026-10-13 from the release checksums.
+      # Update version and hash together; never fetch "latest".
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      SEMGREP_VERSION: "1.180.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans full history
+      - name: Gitleaks (pinned CLI, checksum-verified)
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 .
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: npm audit (production dependencies, high+)
+        # This is the current merge-check scope, not release risk acceptance.
+        # Unresolved High findings, including development tools, still block release.
+        run: npm audit --audit-level=high --omit=dev
+      - name: npm audit (all dependencies, informational)
+        # Keeps dev-toolchain advisories visible in the log without blocking. Revisit when
+        # a compatible upstream fix exists. No patched braces version exists as of 2026-10-13.
+        continue-on-error: true
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install API (runtime + dev extras)
+        working-directory: apps/api
+        run: python -m pip install -e ".[dev]"
+      - name: pip-audit (API environment)
+        working-directory: apps/api
+        run: python -m pip_audit --skip-editable --progress-spinner off
+      - name: Bandit (apps/api/src)
+        working-directory: apps/api
+        run: python -m bandit -c pyproject.toml -r src
+      - name: Semgrep (project rules, offline)
+        # Installed in its own venv so its dependency tree is not part of the pip-audit scope.
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/semgrep"
+          "$RUNNER_TEMP/semgrep/bin/python" -m pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          "$RUNNER_TEMP/semgrep/bin/semgrep" scan --config .semgrep/ --error --metrics=off             --exclude node_modules --exclude .venv

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Verina guard: block confidential and secret material from ever being committed.
+# Activated via: git config core.hooksPath .githooks
+
+staged=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR)
+blocked=$(
+  printf '%s\n' "$staged" | grep -iE '^(private|samples-real)/'
+  printf '%s\n' "$staged" | grep -iE '(^|/)\.env($|\.)|\.env$|\.(pem|key|p12|pfx)$|(^|/)id_(rsa|dsa|ecdsa|ed25519)$' | grep -ivE '(^|/)\.env\.example$'
+)
+if [ -n "$blocked" ]; then
+  echo "pre-commit: refusing to commit confidential or secret files:" >&2
+  echo "$blocked" >&2
+  echo "These belong in private/ (git-ignored) or a secret store." >&2
+  exit 1
+fi
+
+# Cheap secret scan on staged content (full scanning runs in CI with gitleaks).
+if git diff --cached -U0 | grep -E '^\+' | grep -qE '(sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)'; then
+  echo "pre-commit: possible secret in staged changes. Remove it before committing." >&2
+  exit 1
+fi
+exit 0
