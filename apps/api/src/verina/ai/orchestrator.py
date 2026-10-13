@@ -6,21 +6,29 @@
 2. if redaction is enabled for the tenant/matter, pseudonymise variables, document titles
    and document text with one shared mapping (nothing unredacted leaves the process);
 3. render instructions from variables only; documents travel as separate untrusted blocks;
-4. call the model client;
-5. re-identify placeholders in the output (the mapping never leaves the process);
-6. emit exactly one :class:`~verina.audit.events.AIAuditEvent`, on success *and* on a
-   failed call. If the audit sink fails, the run fails (fail closed).
+4. emit an :class:`~verina.audit.events.AIModelCallStarted` record (AI-4). If the sink
+   fails here, no model call is made;
+5. call the model client;
+6. re-identify placeholders in the output (the mapping never leaves the process);
+7. emit exactly one completion :class:`~verina.audit.events.AIAuditEvent` with the same
+   ``call_id``, on success, on a failed call (``error``) and on task cancellation
+   (``cancelled``). If the audit sink fails, the run fails (fail closed).
+
+A process crash between steps 4 and 7 leaves a start without a completion: a *dangling
+call*, listed by :meth:`verina.audit.store.SqlAuditStore.dangling_calls`.
 
 Validation errors raised before step 4 (unknown role, missing template, wrong variables)
 make no model call and therefore emit no event.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
+from uuid import UUID, uuid4
 
 from verina.ai._hashing import canonical_json, sha256_hex
 from verina.ai.audit import AuditEmissionError, AuditSink
@@ -28,7 +36,7 @@ from verina.ai.client import ModelClient, ModelRequest, ModelResponse, Untrusted
 from verina.ai.models import ModelRegistry, ModelRole
 from verina.ai.redaction import NoOpRedactor, RedactionMapping, Redactor, RegexRedactor
 from verina.ai.templates import PromptTemplate, TemplateError, TemplateRegistry
-from verina.audit.events import AIAuditEvent
+from verina.audit.events import AIAuditEvent, AIAuditPayload, AIModelCallStarted
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +128,32 @@ class Orchestrator:
             output_schema=template.output_schema,
         )
         input_hash = sha256_hex(canonical_json(request.canonical()))
+        call_id = uuid4()
+        await self._emit(
+            AIModelCallStarted(
+                call_id=call_id,
+                occurred_at=self._clock(),
+                matter_id=matter_id,
+                actor=actor,
+                task_role=role.value,
+                model_id=request.model,
+                effort=request.effort,
+                template_id=template.id,
+                template_version=template.version,
+                template_hash=template.content_hash,
+                input_hash=input_hash,
+                redaction_applied=redaction_on,
+                redaction_counts=mapping.counts() if redaction_on else {},
+            )
+        )
 
         started = self._timer()
         try:
             response = await self._client.complete(request)
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
             latency_ms = (self._timer() - started) * 1000
             event = self._event(
+                call_id,
                 matter_id,
                 actor,
                 role,
@@ -144,6 +171,7 @@ class Orchestrator:
 
         latency_ms = (self._timer() - started) * 1000
         event = self._event(
+            call_id,
             matter_id,
             actor,
             role,
@@ -185,6 +213,7 @@ class Orchestrator:
 
     def _event(
         self,
+        call_id: UUID,
         matter_id: str,
         actor: str,
         role: ModelRole,
@@ -196,9 +225,15 @@ class Orchestrator:
         mapping: RedactionMapping,
         *,
         response: ModelResponse | None,
-        error: Exception | None,
+        error: BaseException | None,
     ) -> AIAuditEvent:
+        outcome: Literal["success", "error", "cancelled"] = "success"
+        if isinstance(error, asyncio.CancelledError):
+            outcome = "cancelled"
+        elif error is not None:
+            outcome = "error"
         return AIAuditEvent(
+            call_id=call_id,
             occurred_at=self._clock(),
             matter_id=matter_id,
             actor=actor,
@@ -220,20 +255,31 @@ class Orchestrator:
             redaction_counts=mapping.counts() if redaction_on else {},
             stop_reason=response.stop_reason if response else None,
             provider_request_id=response.request_id if response else None,
-            outcome="success" if error is None else "error",
+            outcome=outcome,
             error_type=type(error).__name__ if error is not None else None,
         )
 
-    async def _emit(self, event: AIAuditEvent) -> None:
+    async def _emit(self, event: AIAuditPayload) -> None:
         try:
             await self._sink.emit(event)
         except Exception as exc:
             logger.error("AI audit emission failed for event %s", event.event_id)
             raise AuditEmissionError("audit sink rejected the AI audit event") from exc
+        if isinstance(event, AIModelCallStarted):
+            logger.info(
+                "ai.model_call_started event=%s call=%s matter=%s role=%s model=%s",
+                event.event_id,
+                event.call_id,
+                event.matter_id,
+                event.task_role,
+                event.model_id,
+            )
+            return
         logger.info(
-            "ai.model_call event=%s matter=%s role=%s model=%s template=%s@%s outcome=%s "
-            "in=%d out=%d latency_ms=%.0f redacted=%s",
+            "ai.model_call event=%s call=%s matter=%s role=%s model=%s template=%s@%s "
+            "outcome=%s in=%d out=%d latency_ms=%.0f redacted=%s",
             event.event_id,
+            event.call_id,
             event.matter_id,
             event.task_role,
             event.model_id,

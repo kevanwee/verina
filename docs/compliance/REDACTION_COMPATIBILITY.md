@@ -10,7 +10,7 @@ Reviewed 13 Oct 2026. Design review only; no live provider or client data used. 
 | Stable typed category labels | Runtime uses `NRIC_FIN`, `PHONE_SG`, `EMAIL`; taxonomy uses `NRIC`, `PHONE`, `EMAIL` | Explicit aliases are recorded in JSON as proposals; migration and API/audit compatibility require engineering decisions |
 | Actions MASK / DROP / BLOCK / KEEP | Every accepted regex span receives a reversible mapping | Stronger actions need explicit handling; blocked content cannot be treated as ordinary reversible redaction |
 | Matter-stable mapping and normalisation | Mapping belongs to one run; only NRIC uppercase normalisation exists | Persisted matter-scoped mappings, alias resolution and phone/email normalisation are target design only |
-| Placeholder collision protection | Source placeholders are not escaped before redaction | Source text matching a generated placeholder can be mistaken for mapped output; add collision-safe handling |
+| Placeholder collision protection | Source literals are reserved before token allocation; a later shared-map collision raises RedactionError before client invocation | Literal/value regressions and a two-document no-client-call test cover the supported boundary. This uses allocation/refusal, not the taxonomy's planned escaping scheme |
 | ACL-controlled re-identification | `_reidentify` restores any known placeholder from the supplied map | Caller must enforce matter access and action restrictions; this helper does not establish authorisation |
 | Complete final-payload scan | Redactor operates on text; it is not an independent egress guard | Include every serialised field and metadata channel in an independent fail-closed gate |
 

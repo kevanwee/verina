@@ -14,6 +14,7 @@ from verina.ai import (
 from verina.ai._hashing import canonical_json, sha256_hex
 from verina.ai.models import UnknownModelRoleError
 from verina.ai.orchestrator import TemplateRoleMismatchError
+from verina.ai.redaction import RedactionError
 from verina.ai.templates import TemplateError, TemplateNotFoundError
 from verina.audit.events import AIAuditEvent
 from verina.config import Settings
@@ -33,6 +34,20 @@ CONTRACT = UntrustedDocument(
     ),
 )
 VARIABLES = {"contract_type": "mutual NDA", "perspective": "Discloser (S1234567D)"}
+
+
+def test_cross_document_source_placeholder_collision_blocks_client(
+    fake_client: FakeModelClient, sink: InMemoryAuditSink, settings: Settings
+) -> None:
+    orch = make_orchestrator(fake_client, sink, settings)
+    documents = [
+        UntrustedDocument(document_id="one", title="First", text="x@example.com"),
+        UntrustedDocument(document_id="two", title="Second", text="Literal [EMAIL_1]"),
+    ]
+    with pytest.raises(RedactionError, match="source placeholder conflicts"):
+        asyncio.run(orch.run("triage", "clause.triage", VARIABLES, documents, "M-001", "user-7"))
+    assert fake_client.requests == []
+    assert sink.events == []
 
 
 def _echo_placeholders(request: ModelRequest) -> str:

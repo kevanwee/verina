@@ -73,7 +73,7 @@
     "never": [
       "sent to any model provider or other external service",
       "written to application logs, telemetry or error reports",
-      "included in the audit-store copy of the prompt (the audit store keeps the redacted payload as sent plus hashes)",
+      "included in metadata-only audit records (prompt/output copies require a separately reviewed encrypted evidence store)",
       "shared across matters or tenants",
       "accessible to Verina staff without a customer-approved, time-boxed, audited support grant"
     ],
