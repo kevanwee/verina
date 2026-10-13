@@ -42,6 +42,8 @@ Thumbs.db
 
 # Claude Code local state
 .claude/settings.local.json
+.claude/worktrees/
+*.egg-info/
 
 # Local SQLite databases (unit/dev only)
 *.db
