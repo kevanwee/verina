@@ -4,7 +4,7 @@ Owner: verina-engineer; source reviews: security and QA agents; current hosted C
 
 This table is the specification of `verina.access.policy.MatterAccessPolicy`. The test `apps/api/tests/access/test_access_matrix.py` parses every row between the markers below and asserts the policy's decision and reason code. Changing a row without changing the code (or the reverse) fails CI. Every action and every role must appear in at least one row.
 
-Scope: reusable application boundary with in-memory and durable SQL repository adapters, tested with synthetic fixtures. Real identity provider and HTTP authentication remain unfinished. Tenant, actor and roles come only from the trusted identity adapter.
+Scope: reusable application boundary with in-memory and durable SQL repository adapters, tested with synthetic fixtures, plus a disabled-by-default authenticated HTTP boundary (see "Authenticated HTTP boundary" below and [ADR 007](../adr/007-verified-token-identity-and-matter-api.md)). No identity provider is selected or provisioned. Tenant, actor and roles come only from the trusted identity adapter, never from token claims or request input.
 
 ## How to read a row
 
@@ -152,26 +152,42 @@ Authorization is rechecked after awaited audit emission and collections are quer
 
 Unknown or malformed ledger status fails closed. An explicitly checked empty ledger is represented by a known status with zero entries, never by an absent record or empty mapping. A future durable ledger must bind coverage and attestation to the exact document/output revision. Current attestation and export objects are authorization scaffolding: they do not persist legal attestation or deliver a client artifact.
 
-The current identity adapter remains synthetic. Repository adapters include process-local memory and durable SQL current projections; no public matter service, HTTP auth, uploaded client documents or live model transport is enabled. The public synthetic preview remains a separate release boundary.
+Identity adapters are the synthetic in-memory adapter and `SqlIdentityAdapter` (verified bearer token plus Verina directory, ADR 007). Repository adapters include process-local memory and durable SQL current projections. The authenticated `/v1` matter routes exist but are disabled by default; no uploaded client documents or live model transport is enabled. The public synthetic preview remains a separate release boundary.
 
 
 ## Local/test synthetic recording foundation
 
-`create_matter` and `record_conflict_check` are application methods only. The API remains health-only. Creation is limited to current lawyer/partner roles with a trusted synthetic profile, derives tenant/actor/opaque ID, starts pending, and grants membership only to the creator. This is a controlled engineering default, not production provisioning policy or requester submission.
+`create_matter` and `record_conflict_check` are application methods, reachable over HTTP only through the disabled-by-default `/v1` routes (ADR 007); the default API remains health-only. Creation is limited to current lawyer/partner roles with a trusted synthetic profile, derives tenant/actor/opaque ID, starts pending, and grants membership only to the creator. This is a controlled engineering default, not production provisioning policy or requester submission.
 
 A conflict record snapshots its trusted profile, UTC time, CLEAR/CONFLICT result and positive integer version and typed target matter ID. Evidence from one matter cannot unlock another. Replacing it increments the version and removes the prior waiver. Waivers retain member-lawyer authority including visible self-waivers, and bind to the current recorded hit and matter. Check/status/waiver changes during awaited audit reject recording or waiver with `conflict_changed`; the caller must refresh and explicitly retry rather than silently act on another check. Readiness rejects inconsistent/raw/missing provenance, stale waivers and malformed time/version. Names do not grant authority; historical profile snapshots remain valid after rename/deactivation, while new actions always use current identity.
 
-Requester `ready` means ready at the conflict stage only, not resolved ledger, reviewed advice or approved delivery. No recorder/title/reason appears in this projection or access audit payload. Audit decisions remain permission evidence; repository failure after allow is not a successful mutation receipt. The memory adapter remains process-local; the SQL adapter persists current matter/check/profile state across restart. Neither adapter implements complete historical legal evidence; atomic completed outcomes exist only in durable-transaction mode (see below). Durable history, declined lifecycle, real IdP/HTTP, requester assignment and client uploads remain unfinished.
+Requester `ready` means ready at the conflict stage only, not resolved ledger, reviewed advice or approved delivery. No recorder/title/reason appears in this projection or access audit payload. Audit decisions remain permission evidence; repository failure after allow is not a successful mutation receipt. The memory adapter remains process-local; the SQL adapter persists current matter/check/profile state across restart. Neither adapter implements complete historical legal evidence; atomic completed outcomes exist only in durable-transaction mode (see below). Durable history, declined lifecycle, a selected IdP, requester assignment and client uploads remain unfinished.
 
 
 ## Durable repository projection
 
 The SQL repository selects access facts separately from title/document content and applies tenant visibility before collection content reads. The protected access column includes historical names and waiver reasons; it is not public audit metadata. Authorized content reads bind the full access snapshot and storage revision. All updates and physical deletes compare an expected storage revision, rejecting stale operations without automatic retry. Storage revision is independent of the conflict-check version.
 
-Current matter/check/waiver/profile state survives restart through closed JSON schemas and Alembic. Malformed or inconsistent stored facts fail closed with generic errors. These guarantees do not complete authentic identity, shared mutation/audit outcomes, immutable conflict history, multiworker identity revocation, operational RLS, encryption or hold-aware retention. The API remains health-only. See ADR 006 for the current reusable repository boundary.
+Current matter/check/waiver/profile state survives restart through closed JSON schemas and Alembic. Malformed or inconsistent stored facts fail closed with generic errors. These guarantees do not complete authentic identity, shared mutation/audit outcomes, immutable conflict history, multiworker identity revocation, operational RLS, encryption or hold-aware retention. The default API remains health-only. See ADR 006 for the current reusable repository boundary.
 
 ## Atomic completed outcomes (durable mode)
 
 With `SqlMatterMutationUnitOfWork`, the service locks the tenant audit head first, then reads the operation receipt and locks the matter row, and commits the revision-checked change, completed event and receipt together. Authorization is re-evaluated against current identity inside the transaction. The allow decision event emitted earlier remains a separate permission record and may exist without a completed event.
 
-Operation IDs are tenant-scoped. A retry must match actor, action, target, canonical request hash and the original expected revision; any mismatch fails with a generic replay conflict without exposing the stored result. A replay returns the historical result and never reapplies or re-derives it; it does not certify current readiness. Delete and membership mutation remain separate non-atomic writes and are refused when the unit of work is configured. This remains an application-level foundation: no HTTP route, real IdP, cross-worker revocation or outbox for external side effects.
+Operation IDs are tenant-scoped. A retry must match actor, action, target, canonical request hash and the original expected revision; any mismatch fails with a generic replay conflict without exposing the stored result. A replay returns the historical result and never reapplies or re-derives it; it does not certify current readiness. Delete and membership mutation remain separate non-atomic writes and are refused when the unit of work is configured. This remains an application-level foundation with no outbox for external side effects. The disabled-by-default HTTP routes and the directory-backed revocation check are described below; no IdP is selected.
+
+## Authenticated HTTP boundary (disabled by default)
+
+With `VERINA_MATTERS_API_ENABLED=true`, `/v1/matters` routes authenticate a bearer token against a configured static public JWKS (RS256/ES256/EdDSA only; exact issuer and audience; bounded leeway, lifetime and size). The token contributes only `(issuer, subject)`. The Verina directory (`identity_bindings`, `identity_principals`, migration 0004) supplies tenant, actor, roles, active state and profile, so token role, tenant or group claims and `X-Tenant-Id`/`X-Roles`-style headers have no effect. Enabling the routes without complete auth configuration stops application startup.
+
+| Route | Service method | Action |
+| --- | --- | --- |
+| `POST /v1/matters` | `create_matter` | `create_matter` |
+| `GET /v1/matters/{id}` | `get_matter` (content-reader roles) or `get_matter_status` (others) | `read_matter` / `read_status` |
+| `PATCH /v1/matters/{id}` | `update_title` | `update_matter` |
+| `POST /v1/matters/{id}/conflict-checks` | `record_conflict_check` | `record_conflict_check` |
+| `POST /v1/matters/{id}/conflict-waivers` | `waive_conflict` | `waive_conflict` |
+
+Authorization is unchanged: every route calls the service, and the service applies this matrix. Reason codes map centrally to HTTP status. Missing, other-tenant, walled and non-member matters, and every other matter-route denial (including a member's role or profile denial), return one identical 404 body. 403 is used only for the collection-level create denial. 401 covers authentication failure and a principal deactivated mid-request. Mutations require `Idempotency-Key` (400 if missing or malformed). Non-create mutations require `If-Match` (428 if missing, 400 if malformed, 409 if stale). Reusing a key for a different request returns 409.
+
+Revocation: `current()` re-reads the directory on every check, including inside the mutation transaction (PostgreSQL `FOR SHARE`), so a committed deactivation denies the next check and rolls back an in-flight mutation. This does not revoke identity-provider sessions or tokens, recall data already returned, or end an already-authenticated request when only a binding is removed. Authentication failures and directory changes are not yet audit-chain events. No MFA, assurance level, rate limiting or production identity provider is claimed.

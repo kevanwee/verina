@@ -84,6 +84,7 @@ The draft reading of section 25 sets no fixed period (primary verification cover
 | Version | Date | Change | Author |
 | --- | --- | --- | --- |
 | v0 | 2026-10-13 | Initial inventory aligned with DATA_FLOW v0 | verina-pdpa-counsel |
+| v0 | 2026-10-13 | Engineering addendum: identity directory tables (migration 0004) and the disabled-by-default HTTP boundary; pending PDPA counsel review | verina-engineer |
 
 ## Runtime evidence qualification
 
@@ -108,3 +109,14 @@ When the service is composed with the SQL mutation unit of work, create, title u
 | `matter_mutation_receipts.result_access_json` | Minimal historical access result needed to return the exact original retry result: conflict check (including recorder profile name) and waiver (including reason) where the action produced them; membership/wall sets stripped; create/title receipts strip check/waiver state | Idempotent retry after response loss | Protected confidential business state, not audit metadata; never logged or publicly serialized |
 
 Receipts are append-only (database triggers) and persist alongside the current projection, so they duplicate some protected historical facts. A receipt never grants current authority: replay re-checks current identity, role, membership and wall before the protected column is read, and denies record/waive replays when the current check or waiver differs. No retention period, deletion of receipts/backups, hold handling, encryption or authentic lawyer identity is claimed. A consistently forged privileged database write remains outside this control. Delete and membership changes are rejected in durable-transaction mode until their outcomes are integrated.
+
+## Identity directory and HTTP boundary (migration 0004, disabled by default)
+
+Migration 0004 implements a first, minimal part of the D-13 user directory for the authenticated `/v1` matter routes ([ADR 007](../adr/007-verified-token-identity-and-matter-api.md)). It is populated only by the local/test provisioning CLI with synthetic principals. No identity provider is selected, so no customer IdP data flows into it, and no e-mail address, IP address or token is stored.
+
+| Store | Fields | Purpose | Classification and linkability |
+| --- | --- | --- | --- |
+| `identity_bindings` | `issuer`, `subject` (the identity provider's subject identifier), `tenant_id`, `actor_id`, `created_at` | Map a verified token's `(issuer, subject)` to a Verina principal; token claims grant nothing | Personal data (T3) once real: `subject` is a stable pseudonymous identifier that links to the person at the identity provider, and the row links it to the opaque actor ID in audit metadata (D-09) |
+| `identity_principals` | `tenant_id`, `actor_id`, `roles`, `active`, `display_name` (nullable), `revision`, `updated_at` | Authorization source of truth (roles, deactivation) and trusted profile for named attribution | Personal data (T3): the display name identifies the user. It is retained after deactivation because historical conflict/waiver records reference it (D-03), and that retention needs a PDPA-reviewed period |
+
+At the HTTP boundary the bearer token is verified in memory and never stored or logged. Request bodies (titles, waiver reasons) flow only into the existing protected matter columns and receipts described above. Error bodies never echo input. Authentication failures are not yet recorded (V-02 is still target design), and directory changes are not yet audit-chain events. Retention, deletion or anonymisation of bindings and principals, any cross-tenant or cross-issuer subject reuse policy, a production provisioning workflow, and the choice of identity provider (a new sub-processor or customer IdP) require PDPA counsel and security review before any real user is provisioned.
