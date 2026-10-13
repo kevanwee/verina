@@ -49,3 +49,6 @@ Thumbs.db
 
 # Impeccable local questions, detector state and review screenshots (regenerated)
 apps/web/.impeccable/
+
+# Vercel CLI project link (local only)
+.vercel/
