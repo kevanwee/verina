@@ -1,0 +1,15 @@
+flowchart TB
+  User["Person: developer / reviewer"]
+  subgraph System["Verina system boundary - local development, not a cloud deployment"]
+    Web["Container: web application<br/>Next.js / TypeScript<br/>Synthetic ledger UI; no API integration"]
+    API["Container: API application<br/>Python / FastAPI<br/>GET /health and security middleware"]
+    DB[("Planned container: relational store<br/>Postgres target; not provisioned")]
+    Objects[("Planned container: original-document store<br/>Storage product / deployment undecided")]
+  end
+  User -->|HTTP localhost:3000| Web
+  User -->|HTTP localhost:8000 /health| API
+  Web -.->|Planned authenticated matter API| API
+  API -.->|Planned tenant-scoped persistence| DB
+  API -.->|Planned byte-identical originals + hash| Objects
+  classDef planned fill:#fff6df,stroke:#93713b,stroke-dasharray:5 4,color:#33270e
+  class DB,Objects planned

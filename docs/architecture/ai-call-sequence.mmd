@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  participant Caller as Synthetic test caller
+  participant O as Orchestrator
+  participant R as Registries
+  participant P as Policy / Redactor
+  participant C as ModelClient (fake / explicit mock)
+  participant A as AuditSink (in-memory)
+  Caller->>O: run(role, template, variables, documents, matter, actor)
+  Note over Caller,O: Required identity identifiers checked before registry resolution
+  O->>R: Resolve role and template, verify match
+  alt Invalid role, missing identity or template mismatch
+    O-->>Caller: Raise before model call, no completion event
+  else Valid setup
+    O->>P: Select policy, redact variables, titles, text
+    P-->>O: Safe inputs + shared in-memory mapping
+    O->>R: Render template instructions
+    Note over O,C: Hash canonical request, documents remain separate untrusted blocks
+    O->>C: await complete(request)
+    alt Success
+      C-->>O: ModelResponse
+      O->>A: await emit(success metadata + hashes)
+      alt Sink accepts
+        A-->>O: Recorded in local list
+        O->>P: Re-identify output
+        O-->>Caller: OrchestratorResult
+      else Sink fails
+        A-->>O: Error
+        O-->>Caller: AuditEmissionError, no result returned
+      end
+    else Exception caught by run
+      C-->>O: Exception
+      O->>A: await emit(error metadata)
+      O-->>Caller: Re-raise, sink failure becomes AuditEmissionError
+    end
+  end
+  Note over O,A: Completion-only audit: cancellation / process crash can leave no durable event

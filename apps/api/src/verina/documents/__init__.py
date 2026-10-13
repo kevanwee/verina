@@ -1,0 +1,1 @@
+"""Verina documents package (placeholder)."""

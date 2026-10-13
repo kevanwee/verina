@@ -1,0 +1,43 @@
+classDiagram
+  class Orchestrator {
+    +run(task_role, template_id, variables, documents, matter_id, actor) OrchestratorResult
+  }
+  class ModelClient {
+    <<Protocol>>
+    +complete(request) ModelResponse
+  }
+  class FakeModelClient
+  class AnthropicClient {
+    +complete(request) ModelResponse
+  }
+  class Redactor {
+    <<Protocol>>
+    +redact(text, mapping) tuple
+    +reidentify(text, mapping) str
+  }
+  class RegexRedactor
+  class NoOpRedactor
+  class RedactionPolicy {
+    <<Protocol>>
+    +redaction_enabled(matter_id) bool
+  }
+  class StaticRedactionPolicy
+  class AuditSink {
+    <<Protocol>>
+    +emit(event) None
+  }
+  class InMemoryAuditSink
+  class ModelRegistry
+  class TemplateRegistry
+  Orchestrator --> ModelClient : injected
+  Orchestrator --> Redactor : injected or default
+  Orchestrator --> RedactionPolicy : injected or default
+  Orchestrator --> AuditSink : injected
+  Orchestrator --> ModelRegistry : resolves
+  Orchestrator --> TemplateRegistry : loads
+  ModelClient <|.. FakeModelClient : structural implementation
+  ModelClient <|.. AnthropicClient : structural implementation
+  Redactor <|.. RegexRedactor : structural implementation
+  Redactor <|.. NoOpRedactor : structural implementation
+  RedactionPolicy <|.. StaticRedactionPolicy : structural implementation
+  AuditSink <|.. InMemoryAuditSink : structural implementation
