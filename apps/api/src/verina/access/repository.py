@@ -9,12 +9,17 @@ A database adapter must keep the same contract (and add row-level security as a 
 
 import builtins
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Protocol, runtime_checkable
 
 from verina.access.domain import MatterAccess, MatterId, MatterRecord, TenantId
 
 AccessFilter = Callable[[MatterAccess], bool]
 """Authorization predicate for collection queries, supplied by the application service."""
+
+
+class MatterRevisionConflictError(RuntimeError):
+    """The authorized snapshot no longer matches stored access facts."""
 
 
 class TenantMismatchError(ValueError):
@@ -29,7 +34,13 @@ class MatterRepository(Protocol):
         """Access-control facts only; no content. Used to authorize before content reads."""
         ...
 
-    def get(self, tenant_id: TenantId, matter_id: MatterId) -> MatterRecord | None: ...
+    def get(
+        self,
+        tenant_id: TenantId,
+        matter_id: MatterId,
+        *,
+        expected_access: MatterAccess | None = None,
+    ) -> MatterRecord | None: ...
 
     def list(
         self, tenant_id: TenantId, *, visible: AccessFilter
@@ -43,7 +54,9 @@ class MatterRepository(Protocol):
 
     def update(self, tenant_id: TenantId, record: MatterRecord) -> bool: ...
 
-    def delete(self, tenant_id: TenantId, matter_id: MatterId) -> bool: ...
+    def delete(
+        self, tenant_id: TenantId, matter_id: MatterId, *, expected_revision: int
+    ) -> bool: ...
 
 
 def _require_tenant(tenant_id: object) -> TenantId:
@@ -68,6 +81,8 @@ class InMemoryMatterRepository:
 
     def add(self, tenant_id: TenantId, record: MatterRecord) -> None:
         self._check_owner(_require_tenant(tenant_id), record)
+        if type(record.access.revision) is not int or record.access.revision != 1:
+            raise ValueError("new matter requires initial revision")
         partition = self._partitions.setdefault(tenant_id, {})
         if record.matter_id in partition:
             raise ValueError("matter already exists")
@@ -77,8 +92,17 @@ class InMemoryMatterRepository:
         record = self._partition(tenant_id).get(matter_id)
         return record.access if record is not None else None
 
-    def get(self, tenant_id: TenantId, matter_id: MatterId) -> MatterRecord | None:
-        return self._partition(tenant_id).get(matter_id)
+    def get(
+        self,
+        tenant_id: TenantId,
+        matter_id: MatterId,
+        *,
+        expected_access: MatterAccess | None = None,
+    ) -> MatterRecord | None:
+        record = self._partition(tenant_id).get(matter_id)
+        if record is not None and expected_access is not None and record.access != expected_access:
+            raise MatterRevisionConflictError("matter changed")
+        return record
 
     def list(self, tenant_id: TenantId, *, visible: AccessFilter) -> builtins.list[MatterRecord]:
         records = self._partition(tenant_id).values()
@@ -103,10 +127,26 @@ class InMemoryMatterRepository:
     def update(self, tenant_id: TenantId, record: MatterRecord) -> bool:
         self._check_owner(_require_tenant(tenant_id), record)
         partition = self._partition(tenant_id)
-        if record.matter_id not in partition:
+        current = partition.get(record.matter_id)
+        if (
+            current is None
+            or type(record.access.revision) is not int
+            or current.access.revision != record.access.revision
+        ):
             return False
-        partition[record.matter_id] = record
+        partition[record.matter_id] = replace(
+            record, access=replace(record.access, revision=record.access.revision + 1)
+        )
         return True
 
-    def delete(self, tenant_id: TenantId, matter_id: MatterId) -> bool:
-        return self._partition(tenant_id).pop(matter_id, None) is not None
+    def delete(self, tenant_id: TenantId, matter_id: MatterId, *, expected_revision: int) -> bool:
+        partition = self._partition(tenant_id)
+        current = partition.get(matter_id)
+        if (
+            current is None
+            or type(expected_revision) is not int
+            or current.access.revision != expected_revision
+        ):
+            return False
+        del partition[matter_id]
+        return True

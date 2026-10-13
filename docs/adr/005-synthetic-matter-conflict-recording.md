@@ -18,6 +18,8 @@ Canonical metadata-only access audit decisions precede mutation. After awaited a
 
 ## Consequences and limits
 
+Persistence update: [ADR 006](006-durable-matter-repository.md) adds durable current projections and storage revision checks. The process-local persistence limitations below describe this ADR's original foundation; completed mutation/history and production activation limitations remain.
+
 No authenticated route, upload, public synthetic token issuer or model transport is enabled. The API remains health-only. Requester status exposes an opaque ID and coarse conflict-stage state; `ready` is not complete ledger coverage or client-delivery approval.
 
 Matter/check/profile state remains process-local. SQL audit can survive restart while matter facts disappear. An allow decision does not certify a completed repository mutation; failed writes can leave an allow event. Durable history, atomic completed outcomes, multiworker concurrency controls, historical identity persistence, declined lifecycle and real authentication remain unfinished. Later durable integration must replace the process-local race guarantee with transactional authorization and revision checks.

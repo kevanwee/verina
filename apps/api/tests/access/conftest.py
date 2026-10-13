@@ -126,9 +126,15 @@ class SpyRepository(InMemoryMatterRepository):
         self.calls.append("get_access")
         return super().get_access(tenant_id, matter_id)
 
-    def get(self, tenant_id: TenantId, matter_id: MatterId) -> MatterRecord | None:
+    def get(
+        self,
+        tenant_id: TenantId,
+        matter_id: MatterId,
+        *,
+        expected_access: MatterAccess | None = None,
+    ) -> MatterRecord | None:
         self.calls.append("get")
-        return super().get(tenant_id, matter_id)
+        return super().get(tenant_id, matter_id, expected_access=expected_access)
 
 
 class RecordingRunner:

@@ -103,3 +103,29 @@ def test_default_database_url_is_git_ignored_location() -> None:
     assert url.startswith("sqlite:///./.data/")
     root = Path(__file__).resolve().parents[4]
     assert ".data/" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_engine_hides_bound_parameters_by_default(tmp_path: Path) -> None:
+    engine = make_engine(f"sqlite:///{tmp_path / 'parameters.db'}")
+    try:
+        assert engine.hide_parameters is True
+        assert not engine.echo
+    finally:
+        engine.dispose()
+
+
+def test_bound_parameter_canary_is_hidden_in_database_errors(tmp_path: Path) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'error-parameters.db'}")
+    try:
+        with pytest.raises(SQLAlchemyError) as info, engine.begin() as conn:
+            conn.execute(
+                text("SELECT :value FROM nonexistent_table"),
+                {"value": "Invented confidential canary"},
+            )
+        assert "Invented confidential canary" not in str(info.value)
+        assert "parameters hidden" in str(info.value)
+    finally:
+        engine.dispose()

@@ -1,10 +1,10 @@
 # Access matrix (executable)
 
-Owner: verina-engineer; local hardening and source review: security agent; integrated QA and hosted CI pending · Policy version `2026-10-13.2` · Backlog: EN-7, US-3, US-23 · Decision record: [ADR 003](../adr/003-tenant-matter-authorization-boundary.md)
+Owner: verina-engineer; source reviews: security and QA agents; current hosted CI required | Policy version `2026-10-13.3` | Backlog: EN-7, US-3, US-23 | Decision record: [ADR 003](../adr/003-tenant-matter-authorization-boundary.md)
 
 This table is the specification of `verina.access.policy.MatterAccessPolicy`. The test `apps/api/tests/access/test_access_matrix.py` parses every row between the markers below and asserts the policy's decision and reason code. Changing a row without changing the code (or the reverse) fails CI. Every action and every role must appear in at least one row.
 
-Scope: synthetic, in-memory. No identity provider, database or HTTP authentication is selected. Tenant, actor and roles come only from the trusted identity adapter.
+Scope: reusable application boundary with in-memory and durable SQL repository adapters, tested with synthetic fixtures. Real identity provider and HTTP authentication remain unfinished. Tenant, actor and roles come only from the trusted identity adapter.
 
 ## How to read a row
 
@@ -148,11 +148,11 @@ These are asserted by `apps/api/tests/access/test_matter_service.py` rather than
 
 Requesters have a separate `read_status` action and projection containing an opaque matter ID and coarse readiness only. They cannot read content, titles, search hits, conflict details, waiver reasons or ledger entries through the content service. Knowledge specialists remain explicitly scoped matter members; legal decisions require a lawyer role.
 
-Authorization is rechecked after awaited audit emission and collections are queried again before returning. This closes the demonstrated event-loop revocation race for this in-memory slice. Database-backed operations must use transactional authorization/version checks; no claim of atomic production authorization is made. Audit events represent authorization decisions, not confirmation that a subsequent mutation succeeded. The audit count describes the pre-audit query; a returned collection may be smaller after a concurrent revocation.
+Authorization is rechecked after awaited audit emission and collections are queried again before returning. This closes the demonstrated event-loop revocation race. SQL reads and mutations also bind storage revisions; external identity revocation and completed mutation audit still need integrated transactional controls. No claim of atomic production authorization is made. Audit events represent authorization decisions, not confirmation that a subsequent mutation succeeded. The audit count describes the pre-audit query; a returned collection may be smaller after a concurrent revocation.
 
 Unknown or malformed ledger status fails closed. An explicitly checked empty ledger is represented by a known status with zero entries, never by an absent record or empty mapping. A future durable ledger must bind coverage and attestation to the exact document/output revision. Current attestation and export objects are authorization scaffolding: they do not persist legal attestation or deliver a client artifact.
 
-The identity adapter and repository are synthetic and in-memory; no HTTP auth, uploaded client documents, live model transport or durable matter service is enabled. The public synthetic preview remains a separate release boundary.
+The current identity adapter remains synthetic. Repository adapters include process-local memory and durable SQL current projections; no public matter service, HTTP auth, uploaded client documents or live model transport is enabled. The public synthetic preview remains a separate release boundary.
 
 
 ## Local/test synthetic recording foundation
@@ -161,4 +161,11 @@ The identity adapter and repository are synthetic and in-memory; no HTTP auth, u
 
 A conflict record snapshots its trusted profile, UTC time, CLEAR/CONFLICT result and positive integer version and typed target matter ID. Evidence from one matter cannot unlock another. Replacing it increments the version and removes the prior waiver. Waivers retain member-lawyer authority including visible self-waivers, and bind to the current recorded hit and matter. Check/status/waiver changes during awaited audit reject recording or waiver with `conflict_changed`; the caller must refresh and explicitly retry rather than silently act on another check. Readiness rejects inconsistent/raw/missing provenance, stale waivers and malformed time/version. Names do not grant authority; historical profile snapshots remain valid after rename/deactivation, while new actions always use current identity.
 
-Requester `ready` means ready at the conflict stage only, not resolved ledger, reviewed advice or approved delivery. No recorder/title/reason appears in this projection or access audit payload. Audit decisions remain permission evidence; repository failure after allow is not a successful mutation receipt. Matter/check/profile state is process-local and can disappear while SQL audit remains. Durable history, revision-bound matter transactions/outcomes, declined lifecycle, real IdP/HTTP, requester assignment and client uploads remain unfinished.
+Requester `ready` means ready at the conflict stage only, not resolved ledger, reviewed advice or approved delivery. No recorder/title/reason appears in this projection or access audit payload. Audit decisions remain permission evidence; repository failure after allow is not a successful mutation receipt. The memory adapter remains process-local; the SQL adapter persists current matter/check/profile state across restart. Neither adapter implements complete historical legal evidence or atomic completed outcomes. Durable history, revision-bound matter transactions/outcomes, declined lifecycle, real IdP/HTTP, requester assignment and client uploads remain unfinished.
+
+
+## Durable repository projection
+
+The SQL repository selects access facts separately from title/document content and applies tenant visibility before collection content reads. The protected access column includes historical names and waiver reasons; it is not public audit metadata. Authorized content reads bind the full access snapshot and storage revision. All updates and physical deletes compare an expected storage revision, rejecting stale operations without automatic retry. Storage revision is independent of the conflict-check version.
+
+Current matter/check/waiver/profile state survives restart through closed JSON schemas and Alembic. Malformed or inconsistent stored facts fail closed with generic errors. These guarantees do not complete authentic identity, shared mutation/audit outcomes, immutable conflict history, multiworker identity revocation, operational RLS, encryption or hold-aware retention. The API remains health-only. See ADR 006 for the current reusable repository boundary.

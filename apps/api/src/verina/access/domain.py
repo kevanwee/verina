@@ -106,6 +106,7 @@ class ReasonCode(StrEnum):
     ROLE_NOT_PERMITTED = "role_not_permitted"
     SELF_ESCALATION = "self_escalation"
     TARGET_REQUIRED = "target_required"
+    MATTER_CHANGED = "matter_changed"
     CONFLICT_CHANGED = "conflict_changed"
     CONFLICT_NOT_CLEARED = "conflict_not_cleared"
     CONFLICT_NOT_WAIVABLE = "conflict_not_waivable"
@@ -228,6 +229,8 @@ class MatterAccess:
     conflict_recorded_by: ActorId | None = None
     waiver: ConflictWaiver | None = None
     conflict_check: ConflictCheckRecord | None = None
+    revision: int = 1
+    """Optimistic storage revision, independent of the conflict-check version."""
 
 
 @dataclass(frozen=True, slots=True)

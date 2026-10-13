@@ -46,7 +46,7 @@ from verina.access.domain import (
 )
 from verina.access.identity import IdentityAdapter, Principal
 from verina.access.policy import POLICY_VERSION, MatterAccessPolicy
-from verina.access.repository import MatterRepository
+from verina.access.repository import MatterRepository, MatterRevisionConflictError
 from verina.ai.audit import AuditEmissionError, AuditSink
 from verina.ai.client import UntrustedDocument
 from verina.audit.events import AccessAuditEvent
@@ -273,7 +273,9 @@ class MatterService:
 
     async def delete_matter(self, principal: Principal, matter_id: str) -> None:
         principal, access = await self._authorize(principal, Action.DELETE_MATTER, matter_id)
-        if not self._repo.delete(principal.tenant_id, access.matter_id):
+        if not self._repo.delete(
+            principal.tenant_id, access.matter_id, expected_revision=access.revision
+        ):
             raise AccessDenied(ReasonCode.MATTER_NOT_ACCESSIBLE)
 
     async def grant_membership(
@@ -477,9 +479,14 @@ class MatterService:
         await self._emit(principal, action, None, Decision.allow(), result_count=count)
 
     def _content(self, principal: Principal, access: MatterAccess) -> MatterRecord:
-        record = self._repo.get(principal.tenant_id, access.matter_id)
+        try:
+            record = self._repo.get(principal.tenant_id, access.matter_id, expected_access=access)
+        except MatterRevisionConflictError:
+            raise AccessDenied(ReasonCode.MATTER_CHANGED) from None
         if record is None:  # deleted between authorization and read
             raise AccessDenied(ReasonCode.MATTER_NOT_ACCESSIBLE)
+        if record.access != access:
+            raise AccessDenied(ReasonCode.MATTER_CHANGED)
         return record
 
     def _model_context(self, principal: Principal, access: MatterAccess) -> ModelContext:
