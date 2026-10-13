@@ -47,5 +47,5 @@ Thumbs.db
 *.db
 *.sqlite3
 
-# Impeccable review screenshots (regenerated)
-apps/web/.impeccable/review/
+# Impeccable local questions, detector state and review screenshots (regenerated)
+apps/web/.impeccable/
