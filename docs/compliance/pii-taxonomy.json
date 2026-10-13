@@ -1,0 +1,1255 @@
+{
+  "schema_version": "0.1.0",
+  "taxonomy_version": "2026-10-13.v0.1",
+  "status": "DRAFT v0 - requires PO sign-off before it is used as the S2 redaction rule-set (US-7, FR-2.4)",
+  "owner": "verina-pdpa-counsel",
+  "jurisdiction": "SG",
+  "human_readable_spec": "docs/compliance/PII_TAXONOMY.md",
+  "regex_dialect": "Python 3 `re` (compile with re.IGNORECASE only where `flags` says so). Patterns are candidate generators, not the final decision: every hit is scored with checksum/context/NER before the action is applied.",
+  "sources": {
+    "PDPA": "https://sso.agc.gov.sg/Act/PDPA2012",
+    "PDPA_s2": "https://sso.agc.gov.sg/Act/PDPA2012?ProvIds=pr2-",
+    "PDPA_s4": "https://sso.agc.gov.sg/Act/PDPA2012?ProvIds=pr4-",
+    "PDPA_s24": "https://sso.agc.gov.sg/Act/PDPA2012?ProvIds=pr24-",
+    "DBN_REGS_2021": "https://sso.agc.gov.sg/SL/PDPA2012-S64-2021",
+    "PDP_REGS_2021": "https://sso.agc.gov.sg/SL/PDPA2012-S63-2021",
+    "AG_KEY_CONCEPTS": "https://www.pdpc.gov.sg/-/media/files/pdpc/pdf-files/advisory-guidelines/ag-on-key-concepts/advisory-guidelines-on-key-concepts-in-the-pdpa-17-may-2022.pdf",
+    "AG_NRIC": "https://www.pdpc.gov.sg/-/media/Files/PDPC/PDF-Files/Advisory-Guidelines/Advisory-Guidelines-for-NRIC-Numbers---310818.pdf",
+    "GUIDE_BASIC_ANONYMISATION": "https://www.pdpc.gov.sg/News-and-Events/Announcements/2022/03/Guide-to-Basic-Anonymisation-Now-Available",
+    "AG_GENAI_2026": "https://www.pdpc.gov.sg/organisations/regulations-decisions/regulatory-guidance/advisory-guidelines-on-use-of-personal-data-in-generative-ai",
+    "MINLAW_GENAI_GUIDE_2026": "https://www.mlaw.gov.sg/files/Final_Ver__Guide_for_using_Generative_AI_in_the_Legal_Sector.pdf",
+    "ICA_M_FIN": "https://www.ica.gov.sg/news-and-publications/newsroom/media-release/new-m-fin-series-to-be-introduced-from-1-january-2022",
+    "AG_GENAI_2026_PDF": "https://www.pdpc.gov.sg/assets/143cb9d4-532e-4cca-9a77-bcc0415ca294"
+  },
+  "tiers": {
+    "T1": {
+      "name": "Restricted",
+      "definition": "National identification numbers (NRIC/FIN/passport and similar) and any data prescribed in the Schedule (Part 1) or reg 3(1)(b) of the PDP (Notification of Data Breaches) Regulations 2021, where a breach is deemed to cause significant harm when combined with name or ID number. Also policy-restricted categories (minors, credentials).",
+      "handling": "Never leaves the tenant in clear. Any remaining T1 pattern candidate blocks egress; checksum failure cannot clear it. Highest audit sensitivity."
+    },
+    "T2": {
+      "name": "Sensitive",
+      "definition": "Direct contact/location identifiers and quasi-identifiers (personal phone, personal email, residential address, date of birth, vehicle number, account/customer ids, special attributes by policy).",
+      "handling": "Never leaves the tenant in clear. High-confidence residual hits block; medium-confidence candidates are redacted or resolved by review before egress."
+    },
+    "T3": {
+      "name": "Personal",
+      "definition": "Other personal data: names, business contact information, online identifiers.",
+      "handling": "Pseudonymised before egress. Egress guard blocks on high-confidence hits not covered by a placeholder."
+    },
+    "C": {
+      "name": "Client-confidential (not personal data)",
+      "definition": "Identifiers of client and counterparty organisations (names, UEN), firm file references. Not personal data under PDPA s 2 unless they identify an individual (e.g. a sole proprietor), but confidential under Legal Profession (Professional Conduct) Rules 2015 r 6 and Evidence Act ss 128/128A.",
+      "handling": "Pseudonymised before egress by default (FR-2.4). Firm policy may relax for counterparty names only (open PO question Q-7)."
+    }
+  },
+  "actions": {
+    "PSEUDONYMISE": "Replace the span with a stable typed placeholder (see `placeholder`). Store original-to-placeholder mapping in the tenant redaction map. Model outputs containing the placeholder are re-identified inside the tenant when rendered for a user with matter access.",
+    "MASK": "Replace the span with a typed placeholder. The mapping is NOT used to re-insert the value into AI-generated text: outputs keep the placeholder and the UI shows 'value withheld - see source document'. The original remains only in the original document store.",
+    "DROP": "Remove the span or object from the model payload entirely and insert a neutral marker [OMITTED_<TYPE>]. No mapping is stored. Used for credentials/secrets and for images (signatures, photos, ID scans), which are never sent to an external model.",
+    "BLOCK": "Do not send the excerpt to any external model. Flag for lawyer handling and audit the refusal. A firm-policy override cannot authorise unredacted external egress: that requires an explicit recorded PO exception under AGENTS.md, plus the responsible lawyer's matter approval and other release controls. Neither approval is implied by this taxonomy.",
+    "KEEP": "Not redacted (e.g. public bodies, statutes, courts, arbitral institutions). Listed so that the egress guard does not treat it as a miss."
+  },
+  "placeholder": {
+    "format": "[<TYPE>_<n>]",
+    "regex": "\\[(?:[A-Z]+_)*[A-Z]+_\\d+\\]",
+    "numbering": "n starts at 1 per TYPE, in order of first appearance in the matter.",
+    "scope": "matter",
+    "stability": "The same normalised value receives the same placeholder for every model call in the same matter. Different matters never share placeholders (prevents cross-matter linkage).",
+    "normalisation": {
+      "NRIC": "uppercase, strip spaces and hyphens",
+      "PHONE": "E.164 (+65XXXXXXXX for SG numbers)",
+      "EMAIL": "lowercase",
+      "PERSON": "alias cluster: full name, surname with honorific, given name, initials resolved by coreference; lawyer can merge/split clusters in the redaction review UI",
+      "ORG": "legal name with and without suffix (Pte. Ltd., Pte Ltd, Ltd, LLP) and defined short names are one cluster"
+    },
+    "collision_rule": "If the source text already contains a string matching `placeholder.regex`, escape it (e.g. replace '[' with '\\u27e6' in the payload) before redaction and restore after re-identification, so source text can never be confused with a Verina placeholder.",
+    "type_label_leakage": "Placeholders reveal only the category (e.g. that an NRIC exists), never any character of the value."
+  },
+  "reidentification": {
+    "allowed_for": "Categories with reid_allowed=true only.",
+    "mapping_store": "tenant_redaction_map",
+    "mapping_store_location": "Tenant database in the Singapore region (DATA_FLOW.md F5, 'Redaction map'), encrypted with the tenant data key; crypto-shredded on matter deletion.",
+    "never": [
+      "sent to any model provider or other external service",
+      "written to application logs, telemetry or error reports",
+      "included in the audit-store copy of the prompt (the audit store keeps the redacted payload as sent plus hashes)",
+      "shared across matters or tenants",
+      "accessible to Verina staff without a customer-approved, time-boxed, audited support grant"
+    ],
+    "when": "At render or export time, for a user who passes the matter ACL and ethical-wall check (NFR-4).",
+    "legal_note": "Pseudonymised data is still personal data while the mapping exists (PDPA s 2 'personal data' limb (b); PDPC Guide to Basic Anonymisation: de-identification is only the first step of anonymisation). Unauthorised re-identification of anonymised information by an individual can be an offence (PDPA s 48F)."
+  },
+  "detection_pipeline": {
+    "locality": "All detection runs inside the tenant boundary. No external API (including the model provider) may be used to detect PII, because that would itself be an unredacted egress.",
+    "stages": [
+      "1. Intake dictionary: parties, client and counterparty names, signatories and contacts captured at intake (FR-1.1) seed exact/alias matches.",
+      "2. Pattern + checksum layer: regex candidates from `categories[].detection.regex`, validated by checksum where defined (NRIC/FIN, Luhn).",
+      "3. Context layer: keyword windows (default 40 characters either side) raise or lower confidence.",
+      "4. Local NER model: PERSON, ORG, ADDRESS/LOC, DATE; plus a local lexicon for health and other T1 special categories.",
+      "5. Coreference/alias resolution so that 'Tan Ah Kow', 'Mr Tan' and 'Ah Kow' share one placeholder.",
+      "6. Lawyer review: placeholder list shown before the first model call on a matter (US-7); user can add/remove spans; changes are audit-logged.",
+      "7. Egress guard (independent second detector) re-scans the final serialised request; fails closed (DATA_FLOW.md section 4)."
+    ],
+    "confidence_bands": {
+      "high": ">= 0.85: action applied automatically; guard blocks if found unredacted.",
+      "medium": "0.50-0.85: action applied automatically (bias to over-redact); surfaced for lawyer review.",
+      "low": "< 0.50: not redacted automatically; surfaced as a suggestion only."
+    },
+    "bias": "Over-redaction is preferred to under-redaction. A checksum failure LOWERS confidence but never by itself prevents redaction of an NRIC-shaped string (typos and synthetic numbers are common).",
+    "acceptance_targets_proposed": {
+      "T1_recall_min": 0.99,
+      "T2_recall_min": 0.97,
+      "T3_recall_min": 0.95,
+      "C_recall_min": 0.97,
+      "precision_min_overall": 0.85,
+      "measured_on": "Synthetic SG PII test set (Gate 1, Sprint 2). Targets are proposals pending PO approval (Q-5)."
+    }
+  },
+  "algorithms": {
+    "nric_fin_checksum": {
+      "verification_status": "to_verify",
+      "note": "ICA does not publish the checksum algorithm. This is the widely documented community algorithm. It reproduces the NRIC examples we checked, but the M-series letter table is unconfirmed: ICA's illustrative example 'M1234567B' does not validate under it. Use for confidence scoring only.",
+      "weights": [
+        2,
+        7,
+        6,
+        5,
+        4,
+        3,
+        2
+      ],
+      "prefix_offset": {
+        "S": 0,
+        "F": 0,
+        "T": 4,
+        "G": 4,
+        "M": 3
+      },
+      "modulus": 11,
+      "check_letter_tables": {
+        "S": "JZIHGFEDCBA",
+        "T": "JZIHGFEDCBA",
+        "F": "XWUTRQPNMLK",
+        "G": "XWUTRQPNMLK",
+        "M": "XWUTRQPNJLK"
+      },
+      "procedure": "sum(digit_i * weight_i) + prefix_offset[prefix]; r = sum mod 11; expected_letter = check_letter_tables[prefix][r]"
+    },
+    "luhn": {
+      "verification_status": "implementation_reference_not_primary_verified",
+      "note": "Luhn mod 10 is a proposed checksum confidence signal. No ISO primary standard was retrieved in this review. A failed checksum must not by itself allow a contextual card-number candidate through."
+    }
+  },
+  "categories": [
+    {
+      "id": "person_name",
+      "label": "Individual's name (incl. aliases, initials, honorific forms)",
+      "placeholder_type": "PERSON",
+      "personal_data": true,
+      "tier": "T3",
+      "tier_elevation": "T1 if the individual is a minor or is linked to any T1 special category in the same matter.",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "intake_dictionary",
+          "ner",
+          "regex_context",
+          "coreference"
+        ],
+        "ner_labels": [
+          "PERSON"
+        ],
+        "regex": [
+          {
+            "name": "honorific_name",
+            "pattern": "\\b(?:Mr|Mrs|Ms|Mdm|Miss|Dr|Prof|Encik|Puan|Cik|Tuan)\\.?\\s+[A-Z][a-zA-Z'\\-]+(?:\\s+(?:bin|binte|binti|s/o|d/o|a/l|a/p|[A-Z][a-zA-Z'\\-]+))*"
+          },
+          {
+            "name": "signature_block_name",
+            "pattern": "(?im)^\\s*Name\\s*:\\s*[A-Z][^\\n]{1,80}$"
+          }
+        ],
+        "context_keywords": [
+          "Name:",
+          "signed by",
+          "in the presence of",
+          "attention:",
+          "Attn",
+          "director",
+          "witness",
+          "authorised signatory",
+          "guarantor"
+        ],
+        "notes": "Malay patronymics (bin/binte), Indian (s/o, d/o, a/l, a/p) and Chinese name orders must be handled. Business contact information (PDPA s 4(5)) is still pseudonymised for confidentiality."
+      },
+      "synthetic_examples": [
+        "Mr Tan Ah Kow",
+        "Mdm Siti binte Ahmad",
+        "Name: Rajesh s/o Kumar"
+      ],
+      "false_positive_notes": "Defined terms in capitals (e.g. 'the Supplier'), case names in citations (keep: needed for the Verification Ledger), statute names.",
+      "pdpa_refs": [
+        "PDPA s 2 'personal data'",
+        "PDPA s 4(5) business contact information",
+        "DBN Regs reg 3(1)(a) (full name + prescribed data)"
+      ]
+    },
+    {
+      "id": "nric_fin",
+      "label": "NRIC / FIN number (S, T, F, G, M series), incl. partial or masked forms",
+      "placeholder_type": "NRIC",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "checksum",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "full",
+            "pattern": "\\b[STFGM][\\s\\-]?\\d{7}[\\s\\-]?[A-Z]\\b",
+            "flags": "IGNORECASE"
+          },
+          {
+            "name": "partial_masked",
+            "pattern": "(?<![A-Za-z0-9])[STFGMXx*#][Xx*#]{4}\\d{3}[A-Z](?![A-Za-z0-9])"
+          },
+          {
+            "name": "partial_last4",
+            "pattern": "(?i)(?:NRIC|FIN|IC)\\s*(?:No\\.?|number)?\\s*(?:ending|ending in|last 4)?\\s*[:\\-]?\\s*\\d{3}[A-Z]\\b"
+          }
+        ],
+        "checksum": "algorithms.nric_fin_checksum",
+        "context_keywords": [
+          "NRIC",
+          "FIN",
+          "IC No",
+          "identity card",
+          "I/C",
+          "passport/NRIC",
+          "NRIC/FIN"
+        ],
+        "notes": "Pattern hit alone = medium confidence; pattern + valid checksum or context keyword = high. Partial NRIC (last 3 digits + letter) is still personal data where identifiable (AG NRIC para 5.3)."
+      },
+      "synthetic_examples": [
+        "S1234567D",
+        "T1234567J",
+        "F1234567N",
+        "G1234567X",
+        "S 1234567 D",
+        "SXXXX567D"
+      ],
+      "synthetic_example_warning": "Any well-formed NRIC/FIN may belong to a real person. Use only in synthetic fixtures with fictional names; never combine with real names or addresses.",
+      "false_positive_notes": "Product codes, invoice numbers with the same shape. Context and checksum reduce confidence; over-redaction is acceptable.",
+      "pdpa_refs": [
+        "AG NRIC paras 1.2-1.4, 2.4, 5.2-5.3",
+        "DBN Regs reg 2 'identification number' and reg 3(1)(a)",
+        "ICA M-series media release"
+      ]
+    },
+    {
+      "id": "other_sg_identity_number",
+      "label": "Other Singapore identity numbers: Birth Certificate number, Work Permit number, other pass numbers",
+      "placeholder_type": "ID_NUMBER",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "context",
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "work_permit_context",
+            "pattern": "(?i)(?:work\\s*permit|WP|S\\s*Pass|E(?:mployment)?\\s*Pass|pass)\\s*(?:No\\.?|number)\\s*[:\\-]?\\s*[A-Z0-9]{6,12}\\b"
+          },
+          {
+            "name": "birth_cert_context",
+            "pattern": "(?i)birth\\s*cert(?:ificate)?\\s*(?:No\\.?|number)\\s*[:\\-]?\\s*[A-Z0-9]{6,12}\\b"
+          }
+        ],
+        "context_keywords": [
+          "work permit",
+          "birth certificate",
+          "pass no",
+          "EP",
+          "S Pass"
+        ],
+        "notes": "Formats are to verify. AG NRIC para 1.4 extends NRIC treatment to Birth Certificate, FIN and Work Permit numbers. Detection is context-led because the formats overlap with other numbers."
+      },
+      "synthetic_examples": [
+        "Work Permit No: 012345678",
+        "Birth Certificate No. T1234567J"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "AG NRIC para 1.4",
+        "DBN Regs reg 2"
+      ]
+    },
+    {
+      "id": "passport_number",
+      "label": "Passport number (Singapore and foreign)",
+      "placeholder_type": "PASSPORT",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "sg_passport",
+            "pattern": "\\b[EK]\\d{7}[A-Z]\\b"
+          },
+          {
+            "name": "context_generic",
+            "pattern": "(?i)passport\\s*(?:No\\.?|number)?\\s*[:\\-]?\\s*[A-Z0-9]{6,9}\\b"
+          }
+        ],
+        "context_keywords": [
+          "passport",
+          "travel document",
+          "nationality"
+        ],
+        "notes": "SG passport format ([E|K] + 7 digits + letter) is to verify. Foreign passports are detected by context only."
+      },
+      "synthetic_examples": [
+        "K1234567A",
+        "Passport No.: X12345678"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "AG NRIC para 1.5 (accord passports similar treatment)",
+        "DBN Regs reg 2 'identification number' includes passport number"
+      ]
+    },
+    {
+      "id": "foreign_national_id",
+      "label": "Foreign national ID numbers (e.g. Malaysian MyKad, other government-issued IDs)",
+      "placeholder_type": "ID_NUMBER",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "mykad",
+            "pattern": "\\b\\d{6}-\\d{2}-\\d{4}\\b"
+          },
+          {
+            "name": "context_generic",
+            "pattern": "(?i)(?:ID|identity|identification)\\s*(?:card)?\\s*(?:No\\.?|number)\\s*[:\\-]?\\s*[A-Z0-9\\-]{6,20}\\b"
+          }
+        ],
+        "context_keywords": [
+          "MyKad",
+          "IC",
+          "identity card",
+          "national ID",
+          "KTP",
+          "Aadhaar"
+        ],
+        "notes": "Format of MyKad (YYMMDD-PB-###G) is to verify. DBN Regs reg 2 'identification number' includes foreign identification numbers."
+      },
+      "synthetic_examples": [
+        "900101-14-5678"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "DBN Regs reg 2"
+      ]
+    },
+    {
+      "id": "phone_number",
+      "label": "Telephone / mobile number (incl. +65 formats)",
+      "placeholder_type": "PHONE",
+      "personal_data": "conditional",
+      "personal_data_note": "Personal data when it relates to an identifiable individual; a business number is business contact information (s 4(5)) but is still pseudonymised.",
+      "tier": "T2",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "sg_e164_or_local",
+            "pattern": "(?<!\\d)(?:\\+65[\\s\\-]?|\\(\\+?65\\)[\\s\\-]?|0065[\\s\\-]?)?[3689]\\d{3}[\\s\\-]?\\d{4}(?!\\d)"
+          },
+          {
+            "name": "sg_tollfree",
+            "pattern": "(?<!\\d)1[38]00[\\s\\-]?\\d{3}[\\s\\-]?\\d{4}(?!\\d)"
+          },
+          {
+            "name": "international",
+            "pattern": "(?<![\\w+])\\+(?!65)\\d{1,3}[\\s\\-]?(?:\\(?\\d{1,4}\\)?[\\s\\-]?){2,4}\\d{2,4}(?!\\d)"
+          }
+        ],
+        "context_keywords": [
+          "Tel",
+          "Mobile",
+          "HP",
+          "H/P",
+          "Phone",
+          "Fax",
+          "Contact No"
+        ],
+        "notes": "SG numbers: 8 digits starting with 3 (VoIP), 6 (fixed line), 8 or 9 (mobile) - to verify against IMDA numbering plan. Bare 8-digit hits without context are medium confidence."
+      },
+      "synthetic_examples": [
+        "+65 9123 4567",
+        "(65) 6123-4567",
+        "8123 4567",
+        "1800 123 4567"
+      ],
+      "format_verification_status": "to_verify",
+      "false_positive_notes": "Amounts, clause numbers, dates in numeric form. Require separators or context for bare 8-digit hits.",
+      "pdpa_refs": [
+        "PDPA s 2",
+        "PDPA s 4(5)"
+      ]
+    },
+    {
+      "id": "email_address",
+      "label": "Email address",
+      "placeholder_type": "EMAIL",
+      "personal_data": "conditional",
+      "personal_data_note": "Personal data if it identifies an individual (e.g. name.surname@...). Generic role mailboxes (legal@, info@) are not personal data but are still pseudonymised when they reveal the client organisation.",
+      "tier": "T2",
+      "tier_note": "T3 when it is clearly business contact information.",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "email",
+            "pattern": "\\b[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}\\b"
+          }
+        ],
+        "context_keywords": [
+          "email",
+          "e-mail",
+          "notices"
+        ]
+      },
+      "synthetic_examples": [
+        "tan.ahkow@example.com",
+        "legal@example.sg"
+      ],
+      "pdpa_refs": [
+        "PDPA s 2",
+        "PDPA s 4(5)"
+      ]
+    },
+    {
+      "id": "residential_address",
+      "label": "Residential or postal address incl. Singapore postal code, block/unit numbers",
+      "placeholder_type": "ADDRESS",
+      "personal_data": "conditional",
+      "personal_data_note": "A residential address of an individual is personal data. A registered office address is business information but is pseudonymised with the organisation as client-confidential (tier C).",
+      "tier": "T2",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "ner",
+          "regex",
+          "context"
+        ],
+        "ner_labels": [
+          "ADDRESS",
+          "LOC",
+          "FAC"
+        ],
+        "regex": [
+          {
+            "name": "sg_postal_code_context",
+            "pattern": "(?i)(?:Singapore|S'pore|S)\\s*\\(?(\\d{6})\\)?(?!\\d)"
+          },
+          {
+            "name": "block",
+            "pattern": "(?i)\\b(?:Blk|Block)\\s*\\d{1,4}[A-Z]?\\b"
+          },
+          {
+            "name": "unit_number",
+            "pattern": "#\\d{1,3}-\\d{1,5}[A-Z]?\\b"
+          },
+          {
+            "name": "street",
+            "pattern": "\\b\\d{1,4}[A-Z]?\\s+(?:[A-Z][a-z]+\\s){0,4}(?:Road|Rd|Street|St|Avenue|Ave|Drive|Dr|Lane|Crescent|Cres|Close|Walk|Way|Link|Rise|Hill|Park|Place|Terrace|View|Boulevard|Central|Height|Heights)\\b"
+          }
+        ],
+        "postal_code_rule": "6 digits. First two digits are the postal sector (01-82 assumed; to verify against SingPost). Bare 6-digit numbers are only treated as postal codes with address context.",
+        "context_keywords": [
+          "address",
+          "residing at",
+          "of",
+          "Singapore",
+          "Blk",
+          "#"
+        ],
+        "notes": "Redact the whole address span (street + unit + postal code) as one placeholder. Country and city names alone are KEEP."
+      },
+      "synthetic_examples": [
+        "Blk 123 Example Avenue 4 #05-67 Singapore 560123",
+        "10 Sample Road, Singapore 123456"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "PDPA s 2"
+      ]
+    },
+    {
+      "id": "bank_account",
+      "label": "Bank or finance company account number (incl. IBAN)",
+      "placeholder_type": "BANK_ACCOUNT",
+      "personal_data": "conditional",
+      "personal_data_note": "Personal data when the account is an individual's. Company accounts are client-confidential.",
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "context",
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "account_context",
+            "pattern": "(?i)(?:a/c|acct|account)\\s*(?:no\\.?|number|#)?\\s*[:\\-]?\\s*(\\d[\\d\\s\\-]{6,20}\\d)"
+          },
+          {
+            "name": "iban",
+            "pattern": "\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b"
+          }
+        ],
+        "context_keywords": [
+          "account",
+          "a/c",
+          "bank",
+          "remit",
+          "PayNow",
+          "GIRO",
+          "beneficiary"
+        ],
+        "notes": "SG bank account formats vary by bank (typically 9-12 digits, often hyphenated); context is required. SWIFT/BIC codes and bank names are KEEP (institution identifiers)."
+      },
+      "synthetic_examples": [
+        "Account No.: 123-456789-0",
+        "A/C 0123456789"
+      ],
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 item 4",
+        "DBN Regs reg 3(2)"
+      ]
+    },
+    {
+      "id": "payment_card",
+      "label": "Credit, charge or debit card number",
+      "placeholder_type": "CARD",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "MASK",
+      "reid_allowed": false,
+      "mapping_store": "none",
+      "detection": {
+        "methods": [
+          "regex",
+          "checksum"
+        ],
+        "regex": [
+          {
+            "name": "pan",
+            "pattern": "(?<!\\d)(?:\\d[\\s\\-]?){12,18}\\d(?!\\d)"
+          }
+        ],
+        "checksum": "algorithms.luhn",
+        "context_keywords": [
+          "card",
+          "Visa",
+          "Mastercard",
+          "Amex",
+          "credit card",
+          "debit card"
+        ],
+        "notes": "13-19 digits with optional separators; Luhn-valid = high confidence. A card number has no legitimate role in contract analysis output, so it is masked and never re-inserted."
+      },
+      "synthetic_examples": [
+        "4111 1111 1111 1111",
+        "5555-5555-5555-4444"
+      ],
+      "synthetic_example_note": "These are public payment-network test numbers.",
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 item 3"
+      ]
+    },
+    {
+      "id": "date_of_birth",
+      "label": "Date of birth / age",
+      "placeholder_type": "DOB",
+      "personal_data": true,
+      "tier": "T2",
+      "tier_elevation": "T1 if the computed age at document date is under 18 (see minor_flag).",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "context",
+          "regex",
+          "ner"
+        ],
+        "ner_labels": [
+          "DATE"
+        ],
+        "regex": [
+          {
+            "name": "dob_context",
+            "pattern": "(?i)(?:date\\s+of\\s+birth|D\\.?O\\.?B\\.?|born\\s+on|birth\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}[\\s/\\-.](?:\\d{1,2}|[A-Za-z]{3,9})[\\s/\\-.]\\d{2,4})"
+          },
+          {
+            "name": "age_context",
+            "pattern": "(?i)\\baged?\\s*[:\\-]?\\s*\\d{1,3}\\b"
+          }
+        ],
+        "notes": "Only dates with DOB context are redacted. Contract dates (effective date, term, notice periods) are KEEP: they are essential to the review."
+      },
+      "synthetic_examples": [
+        "Date of Birth: 01/02/1980",
+        "born on 3 March 1975"
+      ],
+      "pdpa_refs": [
+        "PDPA s 2"
+      ]
+    },
+    {
+      "id": "minor_flag",
+      "label": "Data relating to a child or young person (under 18)",
+      "placeholder_type": "MINOR",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "derived",
+          "context"
+        ],
+        "derived_rule": "Any person cluster whose DOB gives age < 18 at the document date, or who is described with minor-context keywords, is tagged MINOR; all of that person's identifiers are elevated to T1 and the matter is flagged.",
+        "context_keywords": [
+          "minor",
+          "infant",
+          "child",
+          "son",
+          "daughter",
+          "guardian",
+          "ward",
+          "student",
+          "aged under 18",
+          "Children and Young Persons Act"
+        ]
+      },
+      "matter_flag": "minor_data_present",
+      "notes": "Personal data identifying a child or young person in CYPA contexts (investigation, arrest, care, court order, proceedings) is prescribed in the DBN Regs Schedule Part 1 item 5 and is handled under special_category_prescribed (BLOCK).",
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 item 5 and Part 2 para 3 ('child or young person' = below 18)"
+      ]
+    },
+    {
+      "id": "health_information",
+      "label": "Health, medical, insurance-claim health information",
+      "placeholder_type": "HEALTH_INFO",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "lexicon",
+          "ner",
+          "context"
+        ],
+        "lexicon_ref": "Local medical-term lexicon (diagnoses, conditions, treatments, medications), maintained by PDPA counsel + AI engineer in S2.",
+        "context_keywords": [
+          "diagnosed",
+          "medical condition",
+          "treatment",
+          "hospital",
+          "clinic",
+          "MC",
+          "medical certificate",
+          "disability",
+          "illness",
+          "injury",
+          "pregnan"
+        ],
+        "notes": "Replace the specific health detail, keep a neutral category placeholder so the model can still reason about the clause (e.g. 'the employee's [HEALTH_INFO_1]'). Items in DBN Regs Schedule Part 1 items 18-20 (STDs, HIV, schizophrenia, substance abuse, fertility, abortion, organ donation) go to special_category_prescribed (BLOCK)."
+      },
+      "synthetic_examples": [
+        "diagnosed with type 2 diabetes",
+        "on medical leave for a back injury"
+      ],
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 item 17(d)"
+      ]
+    },
+    {
+      "id": "special_category_prescribed",
+      "label": "Prescribed highly sensitive data: CYPA/VAA matters, sexual-offence victims and witnesses, Women's Charter place of safety, specified medical conditions (items 18-20), suicide or attempted suicide, domestic/child/sexual abuse, adoption",
+      "placeholder_type": "RESTRICTED",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "BLOCK",
+      "reid_allowed": false,
+      "mapping_store": "none",
+      "detection": {
+        "methods": [
+          "lexicon",
+          "context"
+        ],
+        "context_keywords": [
+          "abuse",
+          "molest",
+          "outrage of modesty",
+          "rape",
+          "sexual assault",
+          "suicide",
+          "adoption",
+          "adopted child",
+          "HIV",
+          "schizophrenia",
+          "addiction",
+          "IVF",
+          "abortion",
+          "organ donation",
+          "place of safety",
+          "vulnerable adult",
+          "Children and Young Persons Act",
+          "Vulnerable Adults Act"
+        ],
+        "notes": "The commercial-contract wedge rarely contains these. Detection triggers BLOCK of the excerpt, a matter flag and lawyer handling. Identification of sexual-offence victims can also be restricted by other written law (to verify per matter)."
+      },
+      "matter_flag": "prescribed_sensitive_data_present",
+      "synthetic_examples": [
+        "the minor was placed in a place of safety",
+        "history of substance addiction"
+      ],
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 items 5, 6, 6A, 6B, 18, 19, 20, 21, 22, 23"
+      ]
+    },
+    {
+      "id": "personal_financial",
+      "label": "An individual's financial information: remuneration, income, net worth, debts, loans, creditworthiness, investments, insurance policy terms",
+      "placeholder_type": "PERSONAL_FINANCIAL",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "context",
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "amount_with_remuneration_context",
+            "pattern": "(?i)(?:salary|remuneration|wages|bonus|commission|allowance|net\\s+worth|income|loan\\s+amount|outstanding\\s+debt)[^.\\n]{0,40}?(?:S\\$|SGD|US\\$|USD|\\$)\\s?\\d[\\d,]*(?:\\.\\d{2})?"
+          }
+        ],
+        "notes": "Only amounts tied to an identifiable individual are redacted. Corporate deal values, fees, liability caps and prices are KEEP by default (they drive the risk review); see PO question Q-8."
+      },
+      "synthetic_examples": [
+        "a monthly salary of S$8,500",
+        "net worth of SGD 2,000,000"
+      ],
+      "pdpa_refs": [
+        "DBN Regs Schedule Part 1 items 1, 2, 8-16, 17"
+      ]
+    },
+    {
+      "id": "credentials_secrets",
+      "label": "Passwords, PINs, security answers, API keys, private keys, account credentials",
+      "placeholder_type": "SECRET",
+      "personal_data": "conditional",
+      "tier": "T1",
+      "default_action": "DROP",
+      "reid_allowed": false,
+      "mapping_store": "none",
+      "detection": {
+        "methods": [
+          "regex",
+          "context",
+          "entropy"
+        ],
+        "regex": [
+          {
+            "name": "password_context",
+            "pattern": "(?i)(?:password|passcode|PIN|security\\s+answer|OTP)\\s*[:=]\\s*\\S{3,}"
+          },
+          {
+            "name": "private_key_block",
+            "pattern": "-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
+          },
+          {
+            "name": "generic_api_key",
+            "pattern": "\\b(?:sk|pk|api|key|token)[_\\-][A-Za-z0-9_\\-]{16,}\\b"
+          }
+        ],
+        "notes": "Also run a high-entropy string detector. Secrets are never needed for contract analysis."
+      },
+      "synthetic_examples": [
+        "Password: Example#2026",
+        "api_key_EXAMPLE0000000000000000"
+      ],
+      "pdpa_refs": [
+        "DBN Regs reg 3(1)(b) (account identifier + access credential)",
+        "DBN Regs Schedule Part 1 item 7 (private keys)"
+      ]
+    },
+    {
+      "id": "signature_image",
+      "label": "Handwritten signatures, initials, signature images",
+      "placeholder_type": "SIGNATURE",
+      "personal_data": true,
+      "tier": "T2",
+      "default_action": "DROP",
+      "reid_allowed": false,
+      "mapping_store": "none",
+      "detection": {
+        "methods": [
+          "document_structure",
+          "image_classifier"
+        ],
+        "notes": "Images embedded in DOCX/PDF are never included in model payloads. Typed '/s/ Name' signatures are handled as person_name. The original document keeps the signature (FR-2.1 originals unchanged)."
+      },
+      "synthetic_examples": [
+        "<embedded image in signature block>",
+        "/s/ Tan Ah Kow"
+      ],
+      "pdpa_refs": [
+        "PDPA s 2"
+      ]
+    },
+    {
+      "id": "photo_biometric",
+      "label": "Photographs of individuals, ID card scans, biometric data (fingerprints, facial templates)",
+      "placeholder_type": "IMAGE",
+      "personal_data": true,
+      "tier": "T1",
+      "default_action": "DROP",
+      "reid_allowed": false,
+      "mapping_store": "none",
+      "detection": {
+        "methods": [
+          "document_structure",
+          "image_classifier"
+        ],
+        "notes": "No image is sent to an external model in MVP. OCR runs locally (DATA_FLOW.md section 5.2) and OCR text goes through the text rules. NRIC card scans: the physical NRIC contains name, photo, thumbprint and address (AG NRIC para 1.3)."
+      },
+      "synthetic_examples": [
+        "<scanned NRIC image in annex>"
+      ],
+      "pdpa_refs": [
+        "AG NRIC para 1.3",
+        "DBN Regs reg 3(1)(b)(ii) (biometric data used for account access)"
+      ]
+    },
+    {
+      "id": "vehicle_registration",
+      "label": "Vehicle registration number",
+      "placeholder_type": "VEHICLE",
+      "personal_data": "conditional",
+      "tier": "T2",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "sg_plate",
+            "pattern": "\\bS[A-Z]{1,2}\\s?\\d{1,4}\\s?[A-Z]\\b"
+          }
+        ],
+        "context_keywords": [
+          "vehicle",
+          "car plate",
+          "registration no",
+          "carpark"
+        ],
+        "notes": "SG plate format is to verify; context improves precision."
+      },
+      "synthetic_examples": [
+        "SBA 1234 A"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "PDPA s 2"
+      ]
+    },
+    {
+      "id": "account_or_reference_id",
+      "label": "Individual's account/customer/employee/policy/CPF/tax reference numbers",
+      "placeholder_type": "ACCOUNT_ID",
+      "personal_data": "conditional",
+      "tier": "T2",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "context",
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "ref_context",
+            "pattern": "(?i)(?:employee|staff|customer|member|policy|CPF|tax\\s*ref(?:erence)?)\\s*(?:ID|No\\.?|number)\\s*[:\\-]?\\s*[A-Z0-9][A-Z0-9\\-/]{3,20}\\b"
+          }
+        ],
+        "notes": "CPF account numbers and IRAS tax reference numbers for individuals are typically the NRIC/FIN; they are caught by nric_fin as well."
+      },
+      "synthetic_examples": [
+        "Employee ID: E-00123",
+        "Policy No. P/2026/000123"
+      ],
+      "pdpa_refs": [
+        "DBN Regs reg 3(1)(b)(i) (account identifier)"
+      ]
+    },
+    {
+      "id": "online_identifier",
+      "label": "IP addresses, device ids, personal social-media handles/URLs",
+      "placeholder_type": "ONLINE_ID",
+      "personal_data": "conditional",
+      "tier": "T3",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex"
+        ],
+        "regex": [
+          {
+            "name": "ipv4",
+            "pattern": "\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b"
+          },
+          {
+            "name": "social_url",
+            "pattern": "(?i)https?://(?:www\\.)?(?:linkedin\\.com/in|facebook\\.com|instagram\\.com|x\\.com|twitter\\.com|tiktok\\.com/@)[^\\s)]+"
+          }
+        ],
+        "notes": "Mostly relevant to email intake headers (F1e) and logs; in contracts, rare."
+      },
+      "synthetic_examples": [
+        "192.0.2.10",
+        "https://www.linkedin.com/in/example-person"
+      ],
+      "pdpa_refs": [
+        "PDPA s 2"
+      ]
+    },
+    {
+      "id": "special_attributes_policy",
+      "label": "Race, religion, ethnicity, sexual orientation, political views, criminal record of an adult (policy category)",
+      "placeholder_type": "SENSITIVE_ATTR",
+      "personal_data": true,
+      "tier": "T2",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "lexicon",
+          "context"
+        ],
+        "notes": "Not a statutory 'special category' under the PDPA (the PDPA has none); treated as sensitive by Verina policy because of harm potential. Arrest of a child is prescribed (item 5) and handled by special_category_prescribed."
+      },
+      "synthetic_examples": [
+        "a member of the Example Faith congregation"
+      ],
+      "pdpa_refs": [
+        "PDPA s 24 (security proportional to sensitivity: AG Key Concepts para 17.2-17.3)"
+      ]
+    },
+    {
+      "id": "org_client",
+      "label": "Client organisation name (legal name, trading name, defined short name)",
+      "placeholder_type": "ORG_CLIENT",
+      "personal_data": false,
+      "personal_data_note": "Not personal data, unless the client is a sole proprietor/individual (then also person_name).",
+      "tier": "C",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "intake_dictionary",
+          "ner",
+          "regex"
+        ],
+        "ner_labels": [
+          "ORG"
+        ],
+        "regex": [
+          {
+            "name": "sg_company_suffix",
+            "pattern": "\\b[A-Z][A-Za-z0-9&'.\\-]*(?:\\s+[A-Z][A-Za-z0-9&'.\\-]*){0,6}\\s+(?:Pte\\.?\\s+Ltd\\.?|Private\\s+Limited|Ltd\\.?|Limited|LLP|LLC|Inc\\.?|Corporation|Corp\\.?|Sdn\\.?\\s+Bhd\\.?|Bhd\\.?)"
+          }
+        ],
+        "notes": "Client identity comes from the intake record (FR-1.1). Role assignment (client vs counterparty vs other) uses the intake record; unknown ORGs default to ORG_OTHER handling."
+      },
+      "synthetic_examples": [
+        "Example Holdings Pte. Ltd.",
+        "Sample Trading LLP"
+      ],
+      "pdpa_refs": [
+        "Not PDPA; confidentiality: Legal Profession (Professional Conduct) Rules 2015 r 6; Evidence Act 1893 ss 128, 128A; FR-2.4"
+      ]
+    },
+    {
+      "id": "org_counterparty",
+      "label": "Counterparty organisation name",
+      "placeholder_type": "ORG_COUNTERPARTY",
+      "personal_data": false,
+      "tier": "C",
+      "default_action": "PSEUDONYMISE",
+      "default_action_configurable": true,
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "intake_dictionary",
+          "ner",
+          "regex"
+        ],
+        "ner_labels": [
+          "ORG"
+        ],
+        "notes": "Firm AI policy may allow counterparty names in clear (PO question Q-7). Default is pseudonymise."
+      },
+      "synthetic_examples": [
+        "Acme Cloud Services Inc."
+      ],
+      "pdpa_refs": [
+        "Confidentiality as for org_client"
+      ]
+    },
+    {
+      "id": "org_other",
+      "label": "Other organisations named in the document (sub-contractors, banks, guarantors' companies)",
+      "placeholder_type": "ORG",
+      "personal_data": false,
+      "tier": "C",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "ner",
+          "regex"
+        ],
+        "ner_labels": [
+          "ORG"
+        ]
+      },
+      "keep_list": "Public bodies, courts, tribunals, arbitral institutions, regulators and standards bodies (e.g. PDPC, MAS, IMDA, SIAC, SIMC, Supreme Court, ACRA, IRAS, ISO) are KEEP: the legal analysis depends on them. Maintained as `keep_list_public_bodies`.",
+      "synthetic_examples": [
+        "Example Logistics Pte Ltd (sub-contractor)"
+      ],
+      "pdpa_refs": [
+        "Confidentiality"
+      ]
+    },
+    {
+      "id": "uen",
+      "label": "Unique Entity Number (UEN) and foreign company registration numbers",
+      "placeholder_type": "UEN",
+      "personal_data": false,
+      "personal_data_note": "Business identifier, not personal data; a sole proprietorship UEN can relate to an identifiable individual (treat as personal data then).",
+      "tier": "C",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "uen_business_rob",
+            "pattern": "\\b\\d{8}[A-Z]\\b"
+          },
+          {
+            "name": "uen_local_company",
+            "pattern": "\\b(?:19|20)\\d{2}\\d{5}[A-Z]\\b"
+          },
+          {
+            "name": "uen_other_entities",
+            "pattern": "\\b[TSR]\\d{2}[A-Z]{2}\\d{4}[A-Z]\\b"
+          }
+        ],
+        "context_keywords": [
+          "UEN",
+          "Registration No",
+          "Company Reg",
+          "Co. Reg. No"
+        ],
+        "notes": "UEN formats per ACRA/UEN conventions are to verify (8 digits + letter for ROB businesses; 9 digits starting with year of registration + letter for local companies; T/S/R + 2-digit year + 2-letter entity type + 4 digits + letter for others). UEN check letter algorithm not verified; pattern + context only."
+      },
+      "synthetic_examples": [
+        "UEN 202612345A",
+        "UEN 12345678X",
+        "UEN T26LL1234A"
+      ],
+      "format_verification_status": "to_verify",
+      "pdpa_refs": [
+        "Not personal data; confidentiality"
+      ]
+    },
+    {
+      "id": "matter_reference",
+      "label": "Firm file references, matter names, deal code names",
+      "placeholder_type": "REFERENCE",
+      "personal_data": "conditional",
+      "personal_data_note": "File references often embed client or lawyer initials.",
+      "tier": "C",
+      "default_action": "PSEUDONYMISE",
+      "reid_allowed": true,
+      "mapping_store": "tenant_redaction_map",
+      "detection": {
+        "methods": [
+          "intake_dictionary",
+          "regex",
+          "context"
+        ],
+        "regex": [
+          {
+            "name": "our_your_ref",
+            "pattern": "(?i)(?:our|your)\\s+ref(?:erence)?\\s*[:.]?\\s*[A-Z0-9][A-Z0-9/\\-.]{2,30}"
+          }
+        ],
+        "notes": "Matter name and code name from the intake record are dictionary matches."
+      },
+      "synthetic_examples": [
+        "Our Ref: ABC/2026/0142"
+      ],
+      "dictionary_examples": [
+        "Project Example (matter code name from the intake record)"
+      ],
+      "pdpa_refs": [
+        "Confidentiality"
+      ]
+    }
+  ],
+  "keep_list_public_bodies": [
+    "Personal Data Protection Commission",
+    "PDPC",
+    "Monetary Authority of Singapore",
+    "MAS",
+    "Infocomm Media Development Authority",
+    "IMDA",
+    "Accounting and Corporate Regulatory Authority",
+    "ACRA",
+    "Inland Revenue Authority of Singapore",
+    "IRAS",
+    "Ministry of Law",
+    "MinLaw",
+    "Singapore International Arbitration Centre",
+    "SIAC",
+    "Singapore International Mediation Centre",
+    "SIMC",
+    "Supreme Court of Singapore",
+    "Singapore International Commercial Court",
+    "SICC",
+    "State Courts",
+    "High Court",
+    "Court of Appeal",
+    "Competition and Consumer Commission of Singapore",
+    "CCCS",
+    "Intellectual Property Office of Singapore",
+    "IPOS",
+    "Cyber Security Agency of Singapore",
+    "CSA",
+    "Immigration & Checkpoints Authority",
+    "ICA"
+  ],
+  "keep_always": [
+    "Statute names and section references (needed for the Verification Ledger)",
+    "Case citations and case names in citations (needed for the Verification Ledger; FR-6.2)",
+    "Contract dates other than dates of birth",
+    "Governing law, jurisdiction, country and city names",
+    "Corporate monetary amounts, fees, caps and percentages (unless personal_financial applies)",
+    "Defined terms that are not themselves names"
+  ],
+  "change_log": [
+    {
+      "version": "2026-10-13.v0",
+      "author": "verina-pdpa-counsel",
+      "change": "Initial taxonomy (T0.4 / EN-5)."
+    },
+    {
+      "version": "2026-10-13.v0.1",
+      "date": "2026-10-13",
+      "change": "Clarify PO exception authority, checksum limits, and runtime compatibility; correct primary MinLaw link."
+    }
+  ],
+  "runtime_compatibility": {
+    "status": "not_implemented_by_regex_v1",
+    "reviewed_path": "apps/api/src/verina/ai/redaction.py",
+    "category_aliases": {
+      "NRIC_FIN": "NRIC",
+      "PHONE_SG": "PHONE",
+      "EMAIL": "EMAIL"
+    },
+    "aliases_are_proposals_only": true,
+    "missing_actions": [
+      "MASK",
+      "DROP",
+      "BLOCK",
+      "KEEP"
+    ],
+    "release_requirement": "Do not route client content externally until full taxonomy coverage, independent final-payload scanning, review, ACL-controlled re-identification and provider controls have been evidenced.",
+    "details": "docs/compliance/REDACTION_COMPATIBILITY.md"
+  }
+}
