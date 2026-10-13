@@ -22,7 +22,13 @@ from verina.access.provision import run as provision
 from verina.access.sql_identity import identity_bindings, identity_principals
 from verina.access.tokens import JwtVerifier
 from verina.config import Settings
-from verina.db import active_connection, downgrade, make_engine, upgrade
+from verina.db import (
+    active_connection,
+    downgrade,
+    make_engine,
+    require_bound_connection,
+    upgrade,
+)
 
 from .conftest import ISSUER, Keys, bearer, mint
 
@@ -348,6 +354,38 @@ def test_provision_cli_round_trip(
             select(identity_principals).where(identity_principals.c.actor_id == "c-lawyer")
         ).one()
     assert (row.roles, row.active, row.revision) == ("lawyer,partner", True, 3)
+
+
+def test_provision_refuses_a_defaulted_env(
+    db_url: str, engine: Engine, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("VERINA_ENV", raising=False)
+    defaulted = Settings(_env_file=None, database_url=db_url)
+    assert defaulted.env == "local" and "env" not in defaulted.model_fields_set
+    argv = ["principal", "--tenant", "tenant-z", "--actor", "z-lawyer", "--roles", "lawyer"]
+    assert provision(argv, defaulted) == 2
+    assert "explicitly" in capsys.readouterr().err
+    with engine.begin() as conn:
+        assert (
+            conn.execute(
+                select(identity_principals).where(identity_principals.c.tenant_id == "tenant-z")
+            ).first()
+            is None
+        )
+    monkeypatch.setenv("VERINA_ENV", "local")
+    assert provision(argv, Settings(_env_file=None, database_url=db_url)) == 0
+
+
+def test_required_binding_without_active_connection_fails_closed(
+    engine: Engine, adapter: SqlIdentityAdapter
+) -> None:
+    with require_bound_connection(engine):
+        with pytest.raises(IdentityUnavailableError):
+            adapter.current(A, ActorId("a-lawyer"))
+        with pytest.raises(IdentityUnavailableError):
+            adapter.profile(A, ActorId("a-lawyer"))
+    # Outside the requirement the adapter may open its own read transaction again.
+    assert adapter.current(A, ActorId("a-lawyer")) is not None
 
 
 def test_provision_cli_rejections(

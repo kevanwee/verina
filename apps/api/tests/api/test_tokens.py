@@ -41,9 +41,39 @@ def test_valid_tokens_for_each_allowed_algorithm(keys: Keys, verifier: JwtVerifi
         )
 
 
-def test_audience_array_containing_configured_audience(keys: Keys, verifier: JwtVerifier) -> None:
-    token = mint(keys, aud=["other-api", AUDIENCE])
-    assert verifier.verify(token).subject == "sub-a-lawyer"
+def test_single_element_audience_array_is_accepted(keys: Keys, verifier: JwtVerifier) -> None:
+    assert verifier.verify(mint(keys, aud=[AUDIENCE])).subject == "sub-a-lawyer"
+
+
+@pytest.mark.parametrize(
+    "aud",
+    [
+        ["other-api", AUDIENCE],
+        [AUDIENCE, AUDIENCE],
+        [AUDIENCE, 7],
+        [],
+        {"aud": AUDIENCE},
+    ],
+)
+def test_multi_or_malformed_audience_is_rejected_by_default(
+    keys: Keys, verifier: JwtVerifier, aud: Any
+) -> None:
+    with pytest.raises(TokenRejected):
+        verifier.verify(mint(keys, aud=aud))
+
+
+def test_extra_audience_only_when_allowlisted(keys: Keys) -> None:
+    jwks = load_jwks(keys.jwks_json())
+    allowing = JwtVerifier(
+        issuer=ISSUER, audience=AUDIENCE, keys=jwks, extra_audiences=["other-api"]
+    )
+    assert allowing.verify(mint(keys, aud=["other-api", AUDIENCE])).subject == "sub-a-lawyer"
+    with pytest.raises(TokenRejected):
+        allowing.verify(mint(keys, aud=["third-api", AUDIENCE]))
+    with pytest.raises(TokenRejected):
+        allowing.verify(mint(keys, aud="other-api"))  # the extra alone is never enough
+    with pytest.raises(TokenRejected):
+        allowing.verify(mint(keys, aud=["other-api", "third-api", AUDIENCE]))
 
 
 @pytest.mark.parametrize(
@@ -101,7 +131,7 @@ def test_alg_none_is_rejected(keys: Keys, verifier: JwtVerifier) -> None:
 
 
 def test_hs256_key_confusion_with_public_key_is_rejected(keys: Keys, verifier: JwtVerifier) -> None:
-    public_pem = keys.rsa_key.public_key().public_bytes(
+    public_pem = keys.rsa_signer.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
     )
     now = int(time.time())
@@ -119,9 +149,9 @@ def test_alg_must_match_the_selected_key(keys: Keys, verifier: JwtVerifier) -> N
         verifier.verify(mint(keys, alg="ES256", kid="rsa-1"))
     # Disallowed asymmetric algorithm even with a valid key.
     with pytest.raises(TokenRejected):
-        verifier.verify(mint(keys, alg="RS512", kid="rsa-1", key=keys.rsa_key))
+        verifier.verify(mint(keys, alg="RS512", kid="rsa-1", key=keys.rsa_signer))
     with pytest.raises(TokenRejected):
-        verifier.verify(mint(keys, alg="PS256", kid="rsa-1", key=keys.rsa_key))
+        verifier.verify(mint(keys, alg="PS256", kid="rsa-1", key=keys.rsa_signer))
 
 
 def test_unknown_or_missing_kid_is_rejected(keys: Keys, verifier: JwtVerifier) -> None:
@@ -129,7 +159,7 @@ def test_unknown_or_missing_kid_is_rejected(keys: Keys, verifier: JwtVerifier) -
         verifier.verify(mint(keys, kid="rsa-2"))
     no_kid = jwt.encode(
         {"iss": ISSUER, "aud": AUDIENCE, "sub": "x", "iat": int(time.time()), "exp": 10**10},
-        keys.rsa_key,
+        keys.rsa_signer,
         algorithm="RS256",
     )
     with pytest.raises(TokenRejected):
@@ -245,17 +275,17 @@ def test_jwks_from_file(tmp_path: Path, keys: Keys) -> None:
 )
 def test_invalid_jwks_fails_closed(keys: Keys, mutate: Any) -> None:
     with pytest.raises(JwksConfigError):
-        load_jwks(json.dumps(mutate(_rsa_jwk(keys.rsa_key))))
+        load_jwks(json.dumps(mutate(_rsa_jwk(keys.rsa_signer))))
 
 
 def test_ec_curve_and_okp_curve_must_match(keys: Keys) -> None:
     jwks = keys.jwks()
-    ec_key = {**jwks["keys"][1], "crv": "P-384"}
+    ec_signer = {**jwks["keys"][1], "crv": "P-384"}
     with pytest.raises(JwksConfigError):
-        load_jwks(json.dumps({"keys": [ec_key]}))
-    ed_key = {**jwks["keys"][2], "crv": "X25519"}
+        load_jwks(json.dumps({"keys": [ec_signer]}))
+    ed_signer = {**jwks["keys"][2], "crv": "X25519"}
     with pytest.raises(JwksConfigError):
-        load_jwks(json.dumps({"keys": [ed_key]}))
+        load_jwks(json.dumps({"keys": [ed_signer]}))
 
 
 def test_weak_rsa_key_is_rejected() -> None:
@@ -291,6 +321,8 @@ def test_jwks_source_errors(tmp_path: Path) -> None:
         {"leeway_seconds": -1},
         {"max_lifetime_seconds": 59},
         {"max_lifetime_seconds": 86401},
+        {"extra_audiences": [""]},
+        {"extra_audiences": [7]},
     ],
 )
 def test_verifier_configuration_is_bounded(keys: Keys, kwargs: dict[str, Any]) -> None:

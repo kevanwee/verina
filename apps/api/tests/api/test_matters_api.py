@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
 
 from verina.access import (
     ActorId,
@@ -17,6 +17,7 @@ from verina.access import (
     MatterContent,
     MatterId,
     MatterRecord,
+    MatterService,
     ReasonCode,
     SqlMatterRepository,
     TenantId,
@@ -34,7 +35,7 @@ from verina.config import Settings
 from verina.main import create_app
 from verina.security import SECURITY_HEADERS
 
-from .conftest import Keys, api_settings, bearer, mint
+from .conftest import ISSUER, Keys, api_settings, bearer, mint
 
 pytestmark = [pytest.mark.story("EN-7"), pytest.mark.story("US-3")]
 
@@ -104,21 +105,50 @@ def test_routes_absent_when_disabled() -> None:
         {"auth_audience": None},
         {"auth_jwks": None},
         {"auth_issuer": ""},
+        {"auth_audience": ""},
         {"auth_jwks": '{"keys": []}'},
+        {"auth_jwks": '{"keys": [ not json'},
         {"auth_jwks": "C:/definitely/missing/jwks.json"},
-        {"env": "production"},  # the synthetic issuer is https; see below for http
+        {"auth_extra_audiences": [""]},
     ],
 )
 def test_enabled_without_complete_config_fails_startup(
     db_url: str, keys: Keys, overrides: dict[str, Any]
 ) -> None:
-    settings = api_settings(db_url, keys, **overrides)
-    if overrides == {"env": "production"}:
-        # A complete https configuration starts; an http issuer outside local/test does not.
-        create_app(settings)
-        settings = api_settings(db_url, keys, env="production", auth_issuer="http://idp.test/")
+    with pytest.raises(MattersApiConfigError):
+        create_app(api_settings(db_url, keys, **overrides))
+
+
+@pytest.mark.parametrize("env", ["production", "staging"])
+def test_enabled_outside_local_or_test_fails_startup(db_url: str, keys: Keys, env: str) -> None:
+    with pytest.raises(MattersApiConfigError):
+        create_app(api_settings(db_url, keys, env=env))
+
+
+def _without_env(db_url: str, keys: Keys) -> dict[str, Any]:
+    values = api_settings(db_url, keys).model_dump()
+    values.pop("env")
+    return values
+
+
+def test_enabled_with_defaulted_env_fails_startup(
+    db_url: str, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VERINA_ENV", raising=False)
+    settings = Settings(_env_file=None, **_without_env(db_url, keys))
+    assert settings.env == "local" and "env" not in settings.model_fields_set
     with pytest.raises(MattersApiConfigError):
         create_app(settings)
+
+
+def test_enabled_with_explicit_env_variable_starts(
+    db_url: str, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VERINA_ENV", "test")
+    settings = Settings(_env_file=None, **_without_env(db_url, keys))
+    assert "env" in settings.model_fields_set
+    app = create_app(settings)
+    assert any(getattr(route, "path", "") == "/v1/matters" for route in app.routes)
 
 
 def test_every_reason_code_has_a_central_mapping() -> None:
@@ -258,38 +288,41 @@ def test_non_member_other_tenant_and_missing_are_identical(client: TestClient, k
     mine = create(client, keys)
     theirs = create(client, keys, "sub-b-lawyer")
 
-    def probe(subject: str, matter: str) -> list[tuple[int, Any, str | None]]:
+    def probe(
+        subject: str, matter: str, if_match: str = '"1"'
+    ) -> list[tuple[int, Any, str | None]]:
         results = []
         results.append(client.get(f"/v1/matters/{matter}", headers=auth(keys, subject)))
         results.append(
             client.patch(
                 f"/v1/matters/{matter}",
-                headers=write(keys, subject, **{"If-Match": '"1"'}),
+                headers=write(keys, subject, **{"If-Match": if_match}),
                 json={"title": "x"},
             )
         )
         results.append(
             client.post(
                 f"/v1/matters/{matter}/conflict-checks",
-                headers=write(keys, subject, **{"If-Match": '"1"'}),
+                headers=write(keys, subject, **{"If-Match": if_match}),
                 json={"result": "CLEAR"},
             )
         )
         results.append(
             client.post(
                 f"/v1/matters/{matter}/conflict-waivers",
-                headers=write(keys, subject, **{"If-Match": '"1"'}),
+                headers=write(keys, subject, **{"If-Match": if_match}),
                 json={"reason": "x"},
             )
         )
         return [(r.status_code, r.json(), r.headers.get("ETag")) for r in results]
 
     expected = [(404, NOT_FOUND, None)] * 4
-    assert probe("sub-a-outsider", mine) == expected  # same tenant, not a member
-    assert probe("sub-a-lawyer", theirs) == expected  # other tenant's real id
-    assert probe("sub-b-lawyer", mine) == expected
-    assert probe("sub-a-lawyer", str(uuid4())) == expected  # nonexistent
-    assert probe("sub-a-lawyer", "bad id with spaces") == expected  # malformed id
+    for if_match in ('"1"', '"99"'):  # a stale precondition must not turn 404 into 409
+        assert probe("sub-a-outsider", mine, if_match) == expected  # same tenant, not member
+        assert probe("sub-a-lawyer", theirs, if_match) == expected  # other tenant's real id
+        assert probe("sub-b-lawyer", mine, if_match) == expected
+        assert probe("sub-a-lawyer", str(uuid4()), if_match) == expected  # nonexistent
+        assert probe("sub-a-lawyer", "bad id with spaces", if_match) == expected  # malformed
     # The real owners still see their own matters.
     assert (
         client.get(f"/v1/matters/{theirs}", headers=auth(keys, "sub-b-lawyer")).status_code == 200
@@ -526,14 +559,32 @@ def test_deactivation_between_requests(
     assert reduced.json() == {"matter_id": matter, "status": "awaiting_clearance"}
 
 
+def _prepare(client: TestClient, keys: Keys, route: str) -> tuple[str, str, dict[str, str], int]:
+    """A fresh matter ready for ``route``: (url, method, body, current revision)."""
+    matter = create(client, keys)
+    if route == "patch":
+        return f"/v1/matters/{matter}", "PATCH", {"title": "Invented revoked change"}, 1
+    if route == "conflict-checks":
+        return f"/v1/matters/{matter}/conflict-checks", "POST", {"result": "CONFLICT"}, 1
+    hit = client.post(
+        f"/v1/matters/{matter}/conflict-checks",
+        headers=write(keys, **{"If-Match": '"1"'}),
+        json={"result": "CONFLICT"},
+    )
+    assert hit.status_code == 200
+    return f"/v1/matters/{matter}/conflict-waivers", "POST", {"reason": CANARY_REASON}, 2
+
+
+@pytest.mark.parametrize("route", ["patch", "conflict-checks", "conflict-waivers"])
 def test_deactivation_between_auth_and_commit_rolls_back(
     client: TestClient,
     keys: Keys,
     engine: Engine,
     directory: IdentityDirectory,
     monkeypatch: pytest.MonkeyPatch,
+    route: str,
 ) -> None:
-    matter = create(client, keys)
+    url, method, body, revision = _prepare(client, keys, route)
     uow = api_of(client).uow
     original = uow.put
 
@@ -543,16 +594,55 @@ def test_deactivation_between_auth_and_commit_rolls_back(
 
     monkeypatch.setattr(uow, "put", revoke_then_put)
     before = counts(engine)
-    response = client.patch(
-        f"/v1/matters/{matter}",
-        headers=write(keys, **{"If-Match": '"1"'}),
-        json={"title": "Invented change after revocation"},
+    response = client.request(
+        method, url, headers=write(keys, **{"If-Match": f'"{revision}"'}), json=body
     )
     assert_unauthenticated(response)
     assert counts(engine) == before
     directory.set_active("tenant-a", "a-lawyer", True)
     monkeypatch.setattr(uow, "put", original)
-    assert client.get(f"/v1/matters/{matter}", headers=auth(keys)).json()["title"] == CANARY_TITLE
+    matter_url = "/".join(url.split("/")[:4])
+    after = client.get(matter_url, headers=auth(keys)).json()
+    assert (after["revision"], after["title"]) == (revision, CANARY_TITLE)
+
+
+@pytest.mark.parametrize("route", ["patch", "conflict-checks", "conflict-waivers"])
+def test_replay_after_deactivation_is_401_and_after_role_loss_is_404(
+    client: TestClient,
+    keys: Keys,
+    engine: Engine,
+    directory: IdentityDirectory,
+    route: str,
+) -> None:
+    url, method, body, revision = _prepare(client, keys, route)
+    headers = write(keys, **{"If-Match": f'"{revision}"'})
+    assert client.request(method, url, headers=headers, json=body).status_code == 200
+    before = counts(engine)
+    directory.set_active("tenant-a", "a-lawyer", False)
+    assert_unauthenticated(client.request(method, url, headers=headers, json=body))
+    directory.set_active("tenant-a", "a-lawyer", True)
+    directory.upsert_principal("tenant-a", "a-lawyer", ["requester"])
+    lost = client.request(method, url, headers=headers, json=body)
+    assert lost.status_code == 404 and lost.json() == NOT_FOUND
+    assert counts(engine) == before
+
+
+def test_same_actor_id_in_another_tenant_is_404(
+    client: TestClient, keys: Keys, directory: IdentityDirectory
+) -> None:
+    matter = create(client, keys)
+    directory.upsert_principal(
+        "tenant-b", "a-lawyer", ["lawyer", "partner"], display_name="Synthetic Twin"
+    )
+    directory.bind(ISSUER, "sub-b-twin", "tenant-b", "a-lawyer")
+    read = client.get(f"/v1/matters/{matter}", headers=auth(keys, "sub-b-twin"))
+    patch = client.patch(
+        f"/v1/matters/{matter}",
+        headers=write(keys, "sub-b-twin", **{"If-Match": '"1"'}),
+        json={"title": "x"},
+    )
+    assert (read.status_code, read.json()) == (404, NOT_FOUND)
+    assert (patch.status_code, patch.json()) == (404, NOT_FOUND)
 
 
 def test_deactivation_during_audit_emission_denies_create(
@@ -606,3 +696,197 @@ def test_no_tokens_titles_or_reasons_in_logs(
     text = caplog.text
     assert token not in text and token.split(".")[2] not in text
     assert CANARY_TITLE not in text and CANARY_REASON not in text
+
+
+def test_no_canaries_in_logs_or_bodies_on_413_422_500(
+    client: TestClient,
+    keys: Keys,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    matter = create(client, keys)
+    too_large = client.post(
+        "/v1/matters",
+        headers={**write(keys), "Content-Type": "application/json"},
+        content=json.dumps({"title": CANARY_TITLE * 1000}).encode(),
+    )
+    invalid = client.post(
+        "/v1/matters", headers=write(keys), json={"title": CANARY_TITLE + "\u202e"}
+    )
+
+    async def boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(f"{CANARY_TITLE} {CANARY_REASON}")
+
+    monkeypatch.setattr(MatterService, "update_title", boom)
+    failing = TestClient(client.app, raise_server_exceptions=False)
+    crashed = failing.patch(
+        f"/v1/matters/{matter}",
+        headers=write(keys, **{"If-Match": '"1"'}),
+        json={"title": CANARY_TITLE},
+    )
+    assert (too_large.status_code, invalid.status_code, crashed.status_code) == (413, 422, 500)
+    for response in (too_large, invalid, crashed):
+        assert CANARY_TITLE not in response.text and CANARY_REASON not in response.text
+    assert "RuntimeError" in caplog.text  # the failure is visible by type only
+    assert CANARY_TITLE not in caplog.text and CANARY_REASON not in caplog.text
+
+
+# ----------------------------------------------------------------------- review fixes
+
+
+def _seed_shared(engine: Engine, matter: str = "m-shared-team") -> str:
+    SqlMatterRepository(engine).add(
+        TenantId("tenant-a"),
+        MatterRecord(
+            MatterAccess(
+                TenantId("tenant-a"),
+                MatterId(matter),
+                members=frozenset({ActorId("a-lawyer"), ActorId("a-partner")}),
+            ),
+            MatterContent(CANARY_TITLE),
+        ),
+    )
+    return f"/v1/matters/{matter}"
+
+
+def test_other_actors_key_on_matter_route_is_uniform_404(
+    client: TestClient, keys: Keys, engine: Engine
+) -> None:
+    url = _seed_shared(engine)
+    key = str(uuid4())
+    body = {"title": "Invented renamed team review"}
+    first = client.patch(
+        url, headers={**auth(keys), "Idempotency-Key": key, "If-Match": '"1"'}, json=body
+    )
+    assert first.status_code == 200
+    before = counts(engine)
+    # A co-member reusing the key (same body) and a stranger both get the plain 404.
+    for subject in ("sub-a-partner", "sub-a-outsider"):
+        other = client.patch(
+            url,
+            headers={**auth(keys, subject), "Idempotency-Key": key, "If-Match": '"1"'},
+            json=body,
+        )
+        assert (other.status_code, other.json()) == (404, NOT_FOUND)
+    # The key's own actor with a different request still gets 409.
+    mine = client.patch(
+        url,
+        headers={**auth(keys), "Idempotency-Key": key, "If-Match": '"1"'},
+        json={"title": "Different invented title"},
+    )
+    assert (mine.status_code, mine.json()) == (409, {"error": "idempotency_key_reused"})
+    assert counts(engine) == before
+
+
+def test_mutation_authorizer_without_bound_connection_fails_closed(
+    client: TestClient, keys: Keys, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import contextmanager
+
+    from verina.access import sql_repository
+
+    matter = create(client, keys)
+    before = counts(engine)
+
+    @contextmanager
+    def unbound(conn: Any) -> Any:
+        yield conn
+
+    monkeypatch.setattr(sql_repository, "bind_connection", unbound)
+    response = client.patch(
+        f"/v1/matters/{matter}",
+        headers=write(keys, **{"If-Match": '"1"'}),
+        json={"title": "Invented unbound change"},
+    )
+    assert (response.status_code, response.json()) == (503, {"error": "unavailable"})
+    assert counts(engine) == before
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Invented\u202eweiver",  # right-to-left override (Cf)
+        "Invented\u200bzero width",  # zero-width space (Cf)
+        "Invented\u2028line",  # line separator (Zl)
+        "Invented\u2029para",  # paragraph separator (Zp)
+        "Invented\ttab",  # tabs are allowed in reasons only
+        "Invented\u00adsoft hyphen",  # soft hyphen (Cf)
+    ],
+)
+def test_titles_reject_invisible_and_separator_characters(
+    client: TestClient, keys: Keys, title: str
+) -> None:
+    response = client.post("/v1/matters", headers=write(keys), json={"title": title})
+    assert (response.status_code, response.json()) == (422, {"error": "validation_failed"})
+
+
+def test_text_is_nfc_normalised_and_reasons_allow_newlines(client: TestClient, keys: Keys) -> None:
+    decomposed = "Invented Cafe\u0301 review"
+    response = client.post("/v1/matters", headers=write(keys), json={"title": decomposed})
+    assert response.status_code == 201
+    matter = response.json()["matter_id"]
+    title = client.get(f"/v1/matters/{matter}", headers=auth(keys)).json()["title"]
+    assert title == "Invented Caf\u00e9 review"
+    hit = client.post(
+        f"/v1/matters/{matter}/conflict-checks",
+        headers=write(keys, **{"If-Match": '"1"'}),
+        json={"result": "CONFLICT"},
+    )
+    assert hit.status_code == 200
+    for bad in ("Invented\u202ereason", "Invented\u200breason", "Invented\u2028reason"):
+        rejected = client.post(
+            f"/v1/matters/{matter}/conflict-waivers",
+            headers=write(keys, **{"If-Match": '"2"'}),
+            json={"reason": bad},
+        )
+        assert (rejected.status_code, rejected.json()) == (422, {"error": "validation_failed"})
+    accepted = client.post(
+        f"/v1/matters/{matter}/conflict-waivers",
+        headers=write(keys, **{"If-Match": '"2"'}),
+        json={"reason": "Invented line one\n\tInvented line two"},
+    )
+    assert accepted.status_code == 200
+
+
+def test_principal_recheck_inside_mutation_uses_for_share_on_postgresql(
+    client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = api_of(client)
+    if api.engine.dialect.name != "postgresql":
+        pytest.skip("FOR SHARE row locking is PostgreSQL-specific; SQLite uses BEGIN IMMEDIATE")
+    matter = create(client, keys)
+    inside: list[str] = []
+    active = {"put": False}
+    original = api.uow.put
+
+    def tracked_put(*args: Any, **kwargs: Any) -> Any:
+        active["put"] = True
+        try:
+            return original(*args, **kwargs)
+        finally:
+            active["put"] = False
+
+    def capture(
+        conn: Any, cursor: Any, statement: str, params: Any, context: Any, many: bool
+    ) -> None:
+        if active["put"]:
+            inside.append(statement)
+
+    monkeypatch.setattr(api.uow, "put", tracked_put)
+    event.listen(api.engine, "before_cursor_execute", capture)
+    try:
+        response = client.patch(
+            f"/v1/matters/{matter}",
+            headers=write(keys, **{"If-Match": '"1"'}),
+            json={"title": "Invented locked change"},
+        )
+    finally:
+        event.remove(api.engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    principal_reads = [
+        s for s in inside if "identity_principals" in s and s.lstrip().upper().startswith("SELECT")
+    ]
+    assert principal_reads, "the mutation must re-read the principal inside its transaction"
+    assert all("FOR SHARE" in s.upper() for s in principal_reads if "roles" in s)
+    assert any("FOR SHARE" in s.upper() for s in principal_reads)

@@ -10,7 +10,8 @@ Usage (``VERINA_DATABASE_URL`` selects the database; migrations must be applied)
     python -m verina.access.provision unbind --issuer https://idp.example.test \
         --subject synthetic-sub-1
 
-Refuses to run unless ``VERINA_ENV`` is ``local`` or ``test``. There is no self-signup and no
+Refuses to run unless ``VERINA_ENV`` is explicitly set to ``local`` or ``test`` (the
+settings default is not enough). There is no self-signup and no
 HTTP administration route; production provisioning is a separate, unreviewed design.
 Output never echoes names, subjects or issuers.
 """
@@ -56,8 +57,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def run(argv: Sequence[str], settings: Settings) -> int:
     args = _parser().parse_args(list(argv))
-    if settings.env not in ("local", "test"):
-        print("provisioning is limited to local/test environments", file=sys.stderr)
+    if "env" not in settings.model_fields_set or settings.env not in ("local", "test"):
+        # The default env is "local"; provisioning must not rely on that default.
+        print("provisioning requires VERINA_ENV explicitly set to local or test", file=sys.stderr)
         return 2
     engine = make_engine(settings.database_url)
     directory = IdentityDirectory(engine)

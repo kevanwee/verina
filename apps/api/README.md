@@ -19,7 +19,8 @@ Configuration is read from environment variables prefixed `VERINA_` (see `.env.e
 against a configured static JWKS and resolve tenant, actor and roles from the Verina identity
 directory ([ADR 007](../../docs/adr/007-verified-token-identity-and-matter-api.md)). Apply
 migrations first (`python -m alembic upgrade head`), then seed synthetic principals and
-bindings locally (refused unless `VERINA_ENV` is `local` or `test`):
+bindings locally. Both the routes and provisioning are refused unless `VERINA_ENV` is
+explicitly set to `local` or `test`; the settings default is not enough:
 
 ```bash
 python -m verina.access.provision principal --tenant t-demo --actor a-lawyer --roles lawyer --display-name "Synthetic Lawyer"

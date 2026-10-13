@@ -11,17 +11,19 @@ Status mapping (see ``_MATTER_ERRORS``):
 * 401 ``unauthenticated`` with ``WWW-Authenticate: Bearer`` - missing/invalid token, unknown
   binding, or a principal deactivated before the request completed;
 * 403 ``forbidden`` - collection-level denial only (``POST /v1/matters`` role or profile);
-* 404 ``not_found`` - every matter-level visibility or role denial;
+* 404 ``not_found`` - every matter-level visibility or role denial, and a matter-route
+  ``Idempotency-Key`` whose receipt belongs to another actor;
 * 400 ``bad_request`` - missing/malformed ``Idempotency-Key`` or malformed ``If-Match``;
 * 428 ``precondition_required`` - missing ``If-Match`` on a non-create mutation (RFC 6585);
-* 409 - stale revision, changed conflict state, or an ``Idempotency-Key`` reused for a
-  different request;
+* 409 - stale revision, changed conflict state, or the caller's own ``Idempotency-Key``
+  reused for a different request (ADR 007 explains the deviation from the draft's 422);
 * 413/415/422 - body too large, not JSON, or failed validation;
 * 503 ``unavailable`` - storage, directory or audit failure (fails closed).
 """
 
 import logging
 import re
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -73,14 +75,33 @@ class ApiError(Exception):
         self.headers = headers or {}
 
 
-def _no_control(value: str) -> str:
-    if not value.strip() or any(ord(c) < 32 or ord(c) == 127 for c in value):
+_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _clean(value: str, allowed_controls: str) -> str:
+    """NFC-normalise and refuse invisible/format/separator characters (bidi overrides,
+    zero-width characters, line/paragraph separators and control characters)."""
+    value = unicodedata.normalize("NFC", value)
+    if not value.strip() or any(
+        unicodedata.category(c) in _FORBIDDEN_CATEGORIES and c not in allowed_controls
+        for c in value
+    ):
         raise ValueError("invalid text")
     return value
 
 
-Title = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_no_control)]
-Reason = Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+def _title_text(value: str) -> str:
+    return _clean(value, "")
+
+
+def _reason_text(value: str) -> str:
+    return _clean(value, "\n\t")
+
+
+Title = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_title_text)]
+Reason = Annotated[
+    str, StringConstraints(min_length=1, max_length=2000), AfterValidator(_reason_text)
+]
 
 
 class _Body(BaseModel):
@@ -101,12 +122,6 @@ class ConflictCheckBody(_Body):
 
 class WaiverBody(_Body):
     reason: Reason
-
-
-def _reason_text(value: str) -> str:
-    if not value.strip() or any(ord(c) < 32 and c not in "\n\t" for c in value):
-        raise ApiError(422, "validation_failed")
-    return value
 
 
 # --------------------------------------------------------------------------- errors
@@ -207,12 +222,19 @@ class MattersApi:
         )
 
 
+def explicit_local_env(settings: Settings) -> bool:
+    """True only when ``env`` was explicitly configured (not defaulted) as local or test."""
+    return "env" in settings.model_fields_set and settings.env in ("local", "test")
+
+
 def _verifier_from(settings: Settings) -> JwtVerifier:
+    if not explicit_local_env(settings):
+        # The default env is "local"; enabling must not rely on that default. Only an
+        # explicitly set local/test environment may run the matters API in this slice.
+        raise MattersApiConfigError("matters API requires VERINA_ENV explicitly set to local/test")
     issuer, audience, jwks = settings.auth_issuer, settings.auth_audience, settings.auth_jwks
     if not issuer or not audience or not jwks:
         raise MattersApiConfigError("matters API requires auth_issuer, auth_audience, auth_jwks")
-    if settings.env not in ("local", "test") and not issuer.startswith("https://"):
-        raise MattersApiConfigError("auth_issuer must be an https URL outside local/test")
     try:
         return JwtVerifier(
             issuer=issuer,
@@ -220,6 +242,7 @@ def _verifier_from(settings: Settings) -> JwtVerifier:
             keys=load_jwks(jwks),
             leeway_seconds=settings.auth_leeway_seconds,
             max_lifetime_seconds=settings.auth_max_token_lifetime_seconds,
+            extra_audiences=settings.auth_extra_audiences,
         )
     except JwksConfigError as exc:
         raise MattersApiConfigError(f"invalid auth configuration: {exc}") from None
@@ -381,6 +404,11 @@ def register_matter_routes(app: FastAPI, api: MattersApi) -> None:
             operation_id = _operation_id(request)
             expected = _expected_revision(request)
             body = await _body(request, model)
+            prior = api.uow.peek(principal.tenant_id, operation_id)
+            if prior is not None and prior.actor_id != principal.actor_id:
+                # Another actor's receipt: answer exactly like an inaccessible matter so a
+                # matter route never reveals that the key (or its matter) exists.
+                raise AccessDenied(ReasonCode.MATTER_NOT_ACCESSIBLE)
             service = api.service_for(principal)
             extra = await run(service, principal, body, operation_id, expected)
             parsed = MatterId.parse(matter_id)
@@ -446,7 +474,7 @@ def register_matter_routes(app: FastAPI, api: MattersApi) -> None:
             waiver = await service.waive_conflict(
                 principal,
                 matter_id,
-                _reason_text(body.reason),
+                body.reason,
                 operation_id=operation_id,
                 expected_revision=expected,
             )

@@ -59,7 +59,7 @@ from verina.access.tokens import (
     JwtVerifier,
     TokenRejected,
 )
-from verina.db import active_connection
+from verina.db import active_connection, bound_connection_required
 
 identity_principals = Table(
     "identity_principals",
@@ -169,6 +169,10 @@ class SqlIdentityAdapter:
         if bound is not None:
             yield bound, True
             return
+        if bound_connection_required(self._engine):
+            # A mutation authorizer must re-check identity on the mutation's own transaction;
+            # never fall back to a separate one (which could miss locks or self-block).
+            raise IdentityUnavailableError()
         try:
             with self._engine.begin() as conn:
                 yield conn, False

@@ -42,6 +42,27 @@ def bind_connection(conn: Connection) -> Iterator[Connection]:
         _ACTIVE_CONNECTION.reset(token)
 
 
+_REQUIRE_BOUND: ContextVar[Engine | None] = ContextVar("verina_require_bound", default=None)
+
+
+@contextmanager
+def require_bound_connection(engine: Engine) -> Iterator[None]:
+    """Declare that same-engine collaborators must read on the bound transaction.
+
+    Used around authorization callbacks inside a durable mutation: a reader that finds no
+    bound connection must fail closed instead of silently opening its own transaction.
+    """
+    token = _REQUIRE_BOUND.set(engine)
+    try:
+        yield
+    finally:
+        _REQUIRE_BOUND.reset(token)
+
+
+def bound_connection_required(engine: Engine) -> bool:
+    return _REQUIRE_BOUND.get() is engine
+
+
 def active_connection(engine: Engine) -> Connection | None:
     """The bound connection when it belongs to ``engine`` and its transaction is open."""
     conn = _ACTIVE_CONNECTION.get()

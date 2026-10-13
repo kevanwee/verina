@@ -44,27 +44,27 @@ PEOPLE: tuple[tuple[str, str, str, tuple[Role, ...], str | None], ...] = (
 
 @dataclass(frozen=True)
 class Keys:
-    rsa_key: rsa.RSAPrivateKey
-    ec_key: ec.EllipticCurvePrivateKey
-    ed_key: ed25519.Ed25519PrivateKey
+    rsa_signer: rsa.RSAPrivateKey
+    ec_signer: ec.EllipticCurvePrivateKey
+    ed_signer: ed25519.Ed25519PrivateKey
     attacker: rsa.RSAPrivateKey
 
     def jwks(self) -> dict[str, Any]:
         return {
             "keys": [
                 {
-                    **RSAAlgorithm.to_jwk(self.rsa_key.public_key(), as_dict=True),
+                    **RSAAlgorithm.to_jwk(self.rsa_signer.public_key(), as_dict=True),
                     "kid": "rsa-1",
                     "alg": "RS256",
                     "use": "sig",
                 },
                 {
-                    **ECAlgorithm.to_jwk(self.ec_key.public_key(), as_dict=True),
+                    **ECAlgorithm.to_jwk(self.ec_signer.public_key(), as_dict=True),
                     "kid": "ec-1",
                     "alg": "ES256",
                 },
                 {
-                    **OKPAlgorithm.to_jwk(self.ed_key.public_key(), as_dict=True),
+                    **OKPAlgorithm.to_jwk(self.ed_signer.public_key(), as_dict=True),
                     "kid": "ed-1",
                     "alg": "EdDSA",
                 },
@@ -78,9 +78,9 @@ class Keys:
 @pytest.fixture(scope="session")
 def keys() -> Keys:
     return Keys(
-        rsa_key=rsa.generate_private_key(public_exponent=65537, key_size=2048),
-        ec_key=ec.generate_private_key(ec.SECP256R1()),
-        ed_key=ed25519.Ed25519PrivateKey.generate(),
+        rsa_signer=rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        ec_signer=ec.generate_private_key(ec.SECP256R1()),
+        ed_signer=ed25519.Ed25519PrivateKey.generate(),
         attacker=rsa.generate_private_key(public_exponent=65537, key_size=2048),
     )
 
@@ -110,7 +110,7 @@ def mint(
 ) -> str:
     signing = key
     if signing is None:
-        signing = {"RS256": keys.rsa_key, "ES256": keys.ec_key, "EdDSA": keys.ed_key}[alg]
+        signing = {"RS256": keys.rsa_signer, "ES256": keys.ec_signer, "EdDSA": keys.ed_signer}[alg]
     return jwt.encode(
         claims(subject, **overrides),
         signing,

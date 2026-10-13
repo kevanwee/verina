@@ -13,8 +13,10 @@ Controls (all fail closed with :class:`TokenRejected`, which carries no detail):
   must equal that key's declared ``alg``;
 * embedded key material or key URLs in the header (``jwk``, ``jku``, ``x5u``, ``x5c``) and
   ``crit`` extensions are rejected; keys only ever come from configuration;
-* exact ``iss``; ``aud`` must equal the configured audience (string) or contain it (array,
-  RFC 7519 4.1.3); ``exp``, ``iat`` and ``sub`` are required; ``nbf`` is honoured if present;
+* exact ``iss``; ``aud`` must be the configured audience as a string or a single-element
+  array. A multi-audience array is accepted only if every other value is in the explicit,
+  empty-by-default ``extra_audiences`` allowlist (a token minted for several APIs is
+  otherwise refused); ``exp``, ``iat`` and ``sub`` are required; ``nbf`` is honoured if present;
 * bounded clock leeway, a maximum ``exp - iat`` lifetime and a maximum token size.
 
 Keys are loaded once from configuration (inline JSON or a local file). No network fetch.
@@ -23,7 +25,7 @@ Keys are loaded once from configuration (inline JSON or a local file). No networ
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -161,6 +163,7 @@ class JwtVerifier:
         keys: Mapping[str, _Key],
         leeway_seconds: int = 30,
         max_lifetime_seconds: int = 3600,
+        extra_audiences: Iterable[str] = (),
     ) -> None:
         if not isinstance(issuer, str) or not 0 < len(issuer) <= MAX_ISSUER_LENGTH:
             raise JwksConfigError("issuer required")
@@ -168,6 +171,9 @@ class JwtVerifier:
             raise JwksConfigError("issuer must not contain whitespace")
         if not isinstance(audience, str) or not 0 < len(audience) <= 255:
             raise JwksConfigError("audience required")
+        extras = frozenset(extra_audiences)
+        if any(not isinstance(a, str) or not 0 < len(a) <= 255 for a in extras):
+            raise JwksConfigError("extra audiences must be non-empty strings")
         if not keys:
             raise JwksConfigError("at least one verification key required")
         if type(leeway_seconds) is not int or not 0 <= leeway_seconds <= MAX_LEEWAY_SECONDS:
@@ -176,6 +182,7 @@ class JwtVerifier:
             raise JwksConfigError("max token lifetime out of range")
         self._issuer = issuer
         self._audience = audience
+        self._extra_audiences = extras - {audience}
         self._keys = dict(keys)
         self._leeway = leeway_seconds
         self._max_lifetime = max_lifetime_seconds
@@ -230,6 +237,24 @@ class JwtVerifier:
             raise TokenRejected()
         return key
 
+    def _audience_ok(self, aud: object) -> bool:
+        """Strict audience: ours alone, or ours plus explicitly allowlisted extras.
+
+        PyJWT's ``strict_aud`` would also refuse a single-element array, which RFC 7519
+        permits and some providers emit, so the strict rule is enforced here; PyJWT has
+        already checked that our audience is present.
+        """
+        if isinstance(aud, str):
+            return aud == self._audience
+        if not isinstance(aud, list) or not aud or not all(isinstance(a, str) for a in aud):
+            return False
+        values = set(aud)
+        return (
+            len(values) == len(aud)
+            and self._audience in values
+            and values - {self._audience} <= self._extra_audiences
+        )
+
     def _check_claims(self, claims: object) -> VerifiedToken:
         if not isinstance(claims, dict):
             raise TokenRejected()
@@ -239,6 +264,8 @@ class JwtVerifier:
         if "nbf" in claims and _number(claims["nbf"]) is None:
             raise TokenRejected()
         if exp <= iat or exp - iat > self._max_lifetime:
+            raise TokenRejected()
+        if not self._audience_ok(claims.get("aud")):
             raise TokenRejected()
         issuer, subject = claims.get("iss"), claims.get("sub")
         if issuer != self._issuer or not isinstance(subject, str):
