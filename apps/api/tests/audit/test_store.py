@@ -97,6 +97,8 @@ def test_store_exposes_no_mutation_methods() -> None:
     public = {name for name in dir(SqlAuditStore) if not name.startswith("_")}
     assert public == {
         "append",
+        "append_on_connection",
+        "lock_tenant_on_connection",
         "dangling_calls",
         "events",
         "for_tenant",

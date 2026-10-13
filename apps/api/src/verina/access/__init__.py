@@ -29,6 +29,11 @@ from verina.access.identity import (
     InMemoryIdentityAdapter,
     Principal,
 )
+from verina.access.mutations import (
+    MutationReceipt,
+    MutationReplayError,
+    SqlMatterMutationUnitOfWork,
+)
 from verina.access.policy import (
     GRANTS,
     POLICY_VERSION,
@@ -91,11 +96,14 @@ __all__ = [
     "MatterStatus",
     "MatterSummary",
     "ModelContext",
+    "MutationReceipt",
+    "MutationReplayError",
     "Principal",
     "ReasonCode",
     "ReviewJob",
     "ReviewRunner",
     "Role",
+    "SqlMatterMutationUnitOfWork",
     "SqlMatterRepository",
     "StoredMatterError",
     "TenantId",

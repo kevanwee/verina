@@ -8,7 +8,13 @@ sharing a ``call_id`` (AI-4). The durable implementation is
 
 from typing import Protocol, runtime_checkable
 
-from verina.audit.events import AccessAuditEvent, AIAuditEvent, AIModelCallStarted, AuditPayload
+from verina.audit.events import (
+    AccessAuditEvent,
+    AIAuditEvent,
+    AIModelCallStarted,
+    AuditPayload,
+    MatterMutationCompleted,
+)
 
 
 class AuditEmissionError(RuntimeError):
@@ -31,6 +37,7 @@ class InMemoryAuditSink:
         self.records: list[AuditPayload] = []
         self.started: list[AIModelCallStarted] = []
         self.events: list[AIAuditEvent] = []
+        self.mutation_events: list[MatterMutationCompleted] = []
         self.access_events: list[AccessAuditEvent] = []
 
     async def emit(self, event: AuditPayload) -> None:
@@ -39,8 +46,10 @@ class InMemoryAuditSink:
             self.started.append(event)
         elif isinstance(event, AIAuditEvent):
             self.events.append(event)
-        else:
+        elif isinstance(event, AccessAuditEvent):
             self.access_events.append(event)
+        else:
+            self.mutation_events.append(event)
 
     @property
     def ai_events(self) -> list[AIAuditEvent]:

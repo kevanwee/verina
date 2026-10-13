@@ -9,6 +9,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import Connection
 
+from verina.access import mutations as _mutations  # noqa: F401 - registers receipt table
 from verina.access.sql_repository import metadata as matter_metadata
 from verina.audit.schema import metadata
 from verina.config import get_settings

@@ -17,10 +17,18 @@ callers must still supply opaque identifiers and approved metadata.
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 MAX_PAYLOAD_STRING = 256
 """Longest string allowed anywhere in a payload. Ids, hashes and enum values fit easily."""
@@ -190,7 +198,53 @@ class AccessAuditEvent(BaseModel):
     )
 
 
-AuditPayload = AIAuditPayload | AccessAuditEvent
+class MatterMutationCompleted(BaseModel):
+    """Committed state transition metadata, distinct from an authorization decision."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    schema_version: Literal[1] = 1
+    event_type: Literal["matter.mutation_completed"] = "matter.mutation_completed"
+    event_id: UUID = Field(default_factory=uuid4)
+    occurred_at: datetime
+    tenant_id: str = Field(min_length=1)
+    actor: str = Field(min_length=1)
+    matter_id: str = Field(min_length=1)
+    operation_id: UUID
+    action: Literal["create_matter", "update_matter", "record_conflict_check", "waive_conflict"]
+    expected_revision: StrictInt = Field(ge=0)
+    result_revision: StrictInt = Field(gt=0)
+    expected_check_version: StrictInt | None = Field(default=None, gt=0)
+    request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    before_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    after_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    result_access_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("occurred_at")
+    @classmethod
+    def _utc_completion(cls, value: datetime) -> datetime:
+        from datetime import timedelta
+
+        if value.utcoffset() != timedelta(0):
+            raise ValueError("completion time must be UTC")
+        return value
+
+    @model_validator(mode="after")
+    def _revision_transition(self) -> Self:
+        if self.result_revision != self.expected_revision + 1:
+            raise ValueError("invalid completed revision step")
+        if self.action == "create_matter":
+            if (
+                self.expected_revision != 0
+                or self.before_hash is not None
+                or self.expected_check_version is not None
+            ):
+                raise ValueError("invalid creation completion")
+        elif self.expected_revision < 1 or self.before_hash is None:
+            raise ValueError("invalid update completion")
+        return self
+
+
+AuditPayload = AIAuditPayload | AccessAuditEvent | MatterMutationCompleted
 
 
 _PAYLOAD_TYPES: dict[str, type[BaseModel]] = {}
@@ -224,6 +278,7 @@ def register_payload_type(model: type[BaseModel]) -> type[BaseModel]:
 register_payload_type(AIModelCallStarted)
 register_payload_type(AIAuditEvent)
 register_payload_type(AccessAuditEvent)
+register_payload_type(MatterMutationCompleted)
 
 
 def payload_type(event_type: str) -> type[BaseModel]:

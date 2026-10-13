@@ -147,7 +147,25 @@ class SqlAuditStore:
     # ---- writes ------------------------------------------------------------------------
 
     def append(self, tenant_id: str, payload: BaseModel) -> AuditEvent:
-        """Append one registered, metadata-only payload to ``tenant_id``'s chain."""
+        """Append one payload in an owned transaction."""
+        with self._engine.begin() as conn:
+            return self.append_on_connection(conn, tenant_id, payload)
+
+    def _require_connection(self, conn: Connection) -> None:
+        if conn.engine is not self._engine or not conn.in_transaction():
+            raise ValueError("audit append requires its active engine transaction")
+
+    def lock_tenant_on_connection(self, conn: Connection, tenant_id: str) -> None:
+        """Acquire the chain lock before operation/matter writes in shared transactions."""
+        self._require_connection(conn)
+        _check_identifier("tenant_id", tenant_id)
+        self._lock_head(conn, tenant_id)
+
+    def append_on_connection(
+        self, conn: Connection, tenant_id: str, payload: BaseModel
+    ) -> AuditEvent:
+        """Append inside a caller-owned active transaction; never commit independently."""
+        self._require_connection(conn)
         _check_identifier("tenant_id", tenant_id)
         data = payload_to_json(payload)
         if data.get("tenant_id", tenant_id) != tenant_id:
@@ -161,47 +179,46 @@ class SqlAuditStore:
         event_id = str(data["event_id"])
         created_at = _as_utc(self._clock())
 
-        with self._engine.begin() as conn:
-            last_sequence, last_hash = self._lock_head(conn, tenant_id)
-            sequence = last_sequence + 1
-            material = hash_material(
-                schema_version=SCHEMA_VERSION,
+        last_sequence, last_hash = self._lock_head(conn, tenant_id)
+        sequence = last_sequence + 1
+        material = hash_material(
+            schema_version=SCHEMA_VERSION,
+            tenant_id=tenant_id,
+            sequence=sequence,
+            event_id=event_id,
+            event_type=event_type,
+            actor=actor,
+            matter_id=matter_id,
+            payload=data,
+            created_at=created_at,
+            prev_hash=last_hash,
+        )
+        digest = event_hash(material)
+        conn.execute(
+            audit_events.insert().values(
                 tenant_id=tenant_id,
                 sequence=sequence,
                 event_id=event_id,
+                schema_version=SCHEMA_VERSION,
                 event_type=event_type,
                 actor=actor,
                 matter_id=matter_id,
-                payload=data,
+                payload=json.dumps(data, sort_keys=True, separators=(",", ":")),
                 created_at=created_at,
                 prev_hash=last_hash,
+                hash=digest,
             )
-            digest = event_hash(material)
-            conn.execute(
-                audit_events.insert().values(
-                    tenant_id=tenant_id,
-                    sequence=sequence,
-                    event_id=event_id,
-                    schema_version=SCHEMA_VERSION,
-                    event_type=event_type,
-                    actor=actor,
-                    matter_id=matter_id,
-                    payload=json.dumps(data, sort_keys=True, separators=(",", ":")),
-                    created_at=created_at,
-                    prev_hash=last_hash,
-                    hash=digest,
-                )
+        )
+        conn.execute(
+            audit_chain_head.update()
+            .where(audit_chain_head.c.tenant_id == tenant_id)
+            .values(
+                last_sequence=sequence,
+                last_hash=digest,
+                head_mac=self._mac(tenant_id, sequence, digest),
+                updated_at=created_at,
             )
-            conn.execute(
-                audit_chain_head.update()
-                .where(audit_chain_head.c.tenant_id == tenant_id)
-                .values(
-                    last_sequence=sequence,
-                    last_hash=digest,
-                    head_mac=self._mac(tenant_id, sequence, digest),
-                    updated_at=created_at,
-                )
-            )
+        )
         return AuditEvent(
             tenant_id=tenant_id,
             sequence=sequence,
