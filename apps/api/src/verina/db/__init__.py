@@ -36,6 +36,7 @@ def make_engine(url: str, **kwargs: Any) -> Engine:
     takes a row lock on the tenant's chain head (``SELECT ... FOR UPDATE``).
     """
     url = normalise_url(url)
+    kwargs.setdefault("hide_parameters", True)
     parsed = make_url(url)
     if parsed.get_backend_name() != "sqlite":
         return create_engine(url, pool_pre_ping=True, **kwargs)

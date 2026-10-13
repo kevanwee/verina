@@ -51,7 +51,7 @@ def test_in_memory_repository_satisfies_protocol(repo: InMemoryMatterRepository)
         lambda r: r.list("tenant-a", visible=everything),
         lambda r: r.search(ActorId("tenant-a"), "x", visible=everything),
         lambda r: r.count("tenant-a", visible=everything),
-        lambda r: r.delete("tenant-a", MatterId("m-alpha")),
+        lambda r: r.delete("tenant-a", MatterId("m-alpha"), expected_revision=1),
     ],
 )
 def test_every_operation_requires_a_tenant_key(
@@ -84,7 +84,7 @@ def test_cross_tenant_writes_rejected(repo: InMemoryMatterRepository) -> None:
         repo.update(TENANT_A, replace(bravo, content=MatterContent("overwritten")))
     with pytest.raises(TenantMismatchError):
         repo.add(TENANT_A, bravo)
-    assert repo.delete(TENANT_A, MatterId("m-bravo")) is False
+    assert repo.delete(TENANT_A, MatterId("m-bravo"), expected_revision=1) is False
     assert repo.get(TENANT_B, MatterId("m-bravo")) == bravo
     ghost = MatterRecord(MatterAccess(TENANT_A, MatterId("m-ghost")), MatterContent("ghost"))
     assert repo.update(TENANT_A, ghost) is False

@@ -4,7 +4,7 @@
 | --- | --- |
 | Version | v0 (Sprint 0, task T0.4 / EN-5) |
 | Owner | verina-pdpa-counsel, with verina-security for flows and storage |
-| Status | **Draft, design-time**, except the locally implemented metadata-only audit boundary described below. Other rows remain target holdings, not observed production storage. Vendors marked TBD are not contracted, so no customer data may reach them |
+| Status | **Draft, design-time**, except implemented repository and metadata-only audit boundaries described below. Other rows remain target holdings, not observed production storage. Vendors marked TBD are not contracted, so no customer data may reach them |
 | Aligned with | [`../security/DATA_FLOW.md`](../security/DATA_FLOW.md) v0 (flows F1–F15, §5.1 state map, §5.2 external calls). Flow ids below refer to that document. The PDPA overlay in DATA_FLOW §8 is a per-flow summary of this inventory |
 | Related | [PDPA_ASSESSMENT.md](PDPA_ASSESSMENT.md) · [PII_TAXONOMY.md](PII_TAXONOMY.md) |
 
@@ -88,3 +88,12 @@ The draft reading of section 25 sets no fixed period (primary verification cover
 ## Runtime evidence qualification
 
 The inventory is a target design, not observed deployment. The current redaction map is process-local for one run; no encrypted tenant database, deletion cascade, region pinning or backup expiry is demonstrated by this inventory. See [REDACTION_COMPATIBILITY.md](REDACTION_COMPATIBILITY.md). Hashes and metadata may remain personal data when linkable; retention of hashes is not by itself proof of anonymisation or deletion.
+
+
+## Implemented durable repository boundary
+
+The reusable SQL matter repository persists a tenant/matter-keyed current projection through Alembic on SQLite/PostgreSQL. `access_json` contains protected membership/wall identifiers, recorded conflict outcomes, historical profile names and waiver reasons. `content_json` contains protected matter titles and document text. Neither column is public metadata. Tests use invented fixtures; this does not establish observed customer holdings or production activation.
+
+Access-only queries omit title/document content; requester responses remain opaque ID and coarse conflict-stage status. Canonical audit payloads still contain bounded identifiers/decision metadata and optional reason hashes, not names, reasons, titles or document text. Hashes are linkable evidence, not anonymisation.
+
+Repository restart persistence and revision protection are implemented. Completed mutation audit/outbox, durable historical record policy, authentic identity provisioning, production encryption/KMS, operational database roles/RLS, retention, backups and hold-aware deletion remain unimplemented or separately reviewed. Physical delete is a storage primitive, not an approved retention workflow. See [ADR 006](../adr/006-durable-matter-repository.md).

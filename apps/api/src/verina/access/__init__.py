@@ -54,6 +54,8 @@ from verina.access.service import (
     ReviewJob,
     ReviewRunner,
 )
+from verina.access.sql_repository import SqlMatterRepository
+from verina.access.storage_codec import StoredMatterError
 
 __all__ = [
     "GRANTS",
@@ -94,6 +96,8 @@ __all__ = [
     "ReviewJob",
     "ReviewRunner",
     "Role",
+    "SqlMatterRepository",
+    "StoredMatterError",
     "TenantId",
     "TenantMismatchError",
 ]

@@ -351,7 +351,11 @@ def test_queued_review_re_evaluated_at_execution(revoke: str, reason: ReasonCode
     elif revoke == "deactivate":
         world.identity.deactivate(TENANT_A, actor)
     else:
-        assert world.repo.delete(TENANT_A, MatterId("m-alpha"))
+        assert world.repo.delete(
+            TENANT_A,
+            MatterId("m-alpha"),
+            expected_revision=world.access(TENANT_A, "m-alpha").revision,
+        )
 
     assert denied(world, world.service.execute_review(job)).reason_code is reason
     assert world.runner.contexts == []

@@ -9,6 +9,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import Connection
 
+from verina.access.sql_repository import metadata as matter_metadata
 from verina.audit.schema import metadata
 from verina.config import get_settings
 from verina.db import make_engine
@@ -16,7 +17,7 @@ from verina.db import make_engine
 config = context.config
 if config.config_file_name is not None:  # CLI use; programmatic runs keep app logging
     fileConfig(config.config_file_name, disable_existing_loggers=False)
-target_metadata = metadata
+target_metadata = [metadata, matter_metadata]
 
 
 def _run(connection: Connection) -> None:
