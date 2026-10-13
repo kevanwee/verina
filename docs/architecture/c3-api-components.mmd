@@ -1,0 +1,25 @@
+flowchart TB
+  Test["Container: local test runner<br/>pytest; synthetic inputs"]
+  subgraph API["API code boundary - one Python application"]
+    Factory["Component: application factory<br/>main.create_app; /health only"]
+    Config["Component: settings<br/>config.Settings"]
+    Headers["Component: response headers<br/>security.add_security_headers"]
+    Orchestrator["Component: AI orchestrator<br/>Internal module; not HTTP mounted"]
+    Registry["Component: model + template registries<br/>Role validation, versioned TOML, hashes"]
+    Redaction["Component: redaction policy + redactor<br/>One in-memory placeholder mapping per call"]
+    Client["Component: model client adapters<br/>FakeModelClient / mock-only AnthropicClient"]
+    Audit["Component: audit sink + event model<br/>InMemoryAuditSink; no durable chain"]
+    Domains["Placeholders: matters, documents, ledger<br/>No domain endpoints or persistence"]
+  end
+  Mock["Test-only provider transport<br/>Explicit in-process httpx2.MockTransport"]
+  Test -->|Creates app| Factory
+  Factory -->|Reads| Config
+  Factory -->|Installs| Headers
+  Test -->|Invokes directly| Orchestrator
+  Orchestrator -->|Resolves task and template| Registry
+  Orchestrator -->|Pseudonymises; later re-identifies| Redaction
+  Orchestrator -->|Calls complete| Client
+  Client -->|SDK serialization; no live network| Mock
+  Orchestrator -->|Emits completion metadata| Audit
+  classDef placeholder fill:#fff6df,stroke:#93713b,stroke-dasharray:5 4,color:#33270e
+  class Domains placeholder
