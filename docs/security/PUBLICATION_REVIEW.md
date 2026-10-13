@@ -8,6 +8,10 @@ No credential or confidential-file blocker was found in the reviewed source-publ
 
 The full npm development-tool advisory remains a release gate issue under R-002. It does not itself prevent sharing synthetic source code. Existing R-001 product-owner risk acceptances remain in force; no new acceptance is inferred. Hosted CI and repository protection require separate observed evidence.
 
+### Public visibility follow-up
+
+The product owner subsequently requested public repository visibility and an explicit AI-agent Scrum experiment note. The coordinating agent rechecked the published refs and final staged files before that visibility change. This records the user's source-publication authorization, not a new security-agent review or production approval. The earlier security review remains bounded to its stated snapshot. Private plans, handoffs, supplied PDFs and extracts remain excluded; subsequent committed changes must pass the same guards and secret scan.
+
 ## Publication evidence
 
 - `scripts/guard.py`: pass, 263 candidate paths; configured hook path `.githooks`.

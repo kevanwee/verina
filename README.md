@@ -1,6 +1,10 @@
 # Verina
 
-Verified AI workbench for contract review.
+> **Experiment:** exploring Scrum principles with AI agents working as a collaborative software team.
+
+Verina is an experimental AI workbench for contract review. The current prototype uses synthetic examples and mock AI clients. It is not a production legal service; live model calls and client-data processing remain disabled.
+
+The [team process](docs/process/README.md) records the shared Definition of Done, planning and review practices. Architecture and landing-page refinements are developed through role-attributed commits and reviewable pull requests. Confidential planning, handoffs and supplied reference documents remain outside this repository.
 
 ## Layout
 
