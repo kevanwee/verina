@@ -27,6 +27,24 @@ class Settings(BaseSettings):
     # truncation plus a consistent head rewind by a database writer is not detectable.
     audit_head_key: SecretStr | None = None
 
+    # --- Authenticated matter API (ADR 007) --------------------------------------------
+    # Off by default: the API stays health-only unless explicitly enabled. Enabling also
+    # requires VERINA_ENV to be explicitly set to local or test, plus issuer, audience and
+    # JWKS; startup fails closed otherwise.
+    matters_api_enabled: bool = False
+    # Exact expected ``iss`` claim (https:// required outside local/test).
+    auth_issuer: str | None = None
+    # Expected ``aud`` value: an API identifier, never an OAuth client_id.
+    auth_audience: str | None = None
+    # Explicit extra audiences a multi-audience token may also carry (default: none, so a
+    # token minted for several APIs is refused).
+    auth_extra_audiences: list[str] = Field(default_factory=list)
+    # Static public JWKS: inline JSON (starting with "{") or a local file path. Public keys
+    # only; there is no network JWKS fetch in this slice.
+    auth_jwks: str | None = None
+    auth_leeway_seconds: int = Field(default=30, ge=0, le=120)
+    auth_max_token_lifetime_seconds: int = Field(default=3600, ge=60, le=86400)
+
     # --- AI orchestrator (verina.ai) -------------------------------------------------
     # The key is a SecretStr so it is masked in repr/str/model_dump. Supply it only via
     # the environment (VERINA_ANTHROPIC_API_KEY) or a secret manager, never in code.

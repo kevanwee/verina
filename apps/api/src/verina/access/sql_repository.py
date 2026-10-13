@@ -28,6 +28,7 @@ from verina.access.repository import (
     _require_tenant,
 )
 from verina.access.storage_codec import decode_access, decode_content, encode_access, encode_content
+from verina.db import bind_connection
 
 metadata = MetaData()
 matters = Table(
@@ -57,7 +58,7 @@ class SqlMatterRepository:
     @contextmanager
     def _transaction(self) -> Iterator[Connection]:
         try:
-            with self._engine.begin() as conn:
+            with self._engine.begin() as conn, bind_connection(conn):
                 yield conn
         except SQLAlchemyError:
             raise MatterStorageError("matter storage unavailable") from None

@@ -45,6 +45,7 @@ from verina.audit.chain import event_hash, hash_material
 from verina.audit.events import MatterMutationCompleted
 from verina.audit.schema import audit_events
 from verina.audit.store import SqlAuditStore
+from verina.db import require_bound_connection
 
 SUPPORTED = frozenset(
     {
@@ -128,6 +129,16 @@ class SqlMatterMutationUnitOfWork:
         self.repository = repository
         self.audit = audit
         self._clock = clock
+
+    def _check(
+        self,
+        authorize: Callable[[MatterAccess | None, bool], None],
+        current: MatterAccess | None,
+        replayed: bool,
+    ) -> None:
+        """Run the service authorizer; identity reads must use this mutation's transaction."""
+        with require_bound_connection(self.repository._engine):
+            authorize(current, replayed)
 
     def _metadata(self, conn: Connection, row: Row[Any]) -> tuple[MutationToken, str]:
         try:
@@ -292,7 +303,7 @@ class SqlMatterMutationUnitOfWork:
             )
             if current is None or current != expected_access:
                 raise MatterRevisionConflictError("matter changed")
-            authorize(current, True)
+            self._check(authorize, current, True)
             full = conn.execute(
                 select(receipts).where(
                     receipts.c.tenant_id == tenant.value,
@@ -410,7 +421,7 @@ class SqlMatterMutationUnitOfWork:
                     fingerprint,
                     token.expected_revision if requested_revision is None else requested_revision,
                 )
-                authorize(current, True)
+                self._check(authorize, current, True)
                 full = conn.execute(
                     select(receipts).where(
                         receipts.c.tenant_id == principal.tenant_id.value,
@@ -429,7 +440,7 @@ class SqlMatterMutationUnitOfWork:
                 ):
                     raise MatterRevisionConflictError("conflict changed")
                 return receipt
-            authorize(current, False)
+            self._check(authorize, current, False)
             if requested_revision is not None and requested_revision != expected_revision:
                 raise MatterRevisionConflictError("matter changed")
             before_hash = None

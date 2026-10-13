@@ -16,3 +16,11 @@ regexes = [
   # docs/security/THREAT_MODEL.md asset table: "IdP secrets, M365/DocuSign tokens"
   '''^M365/DocuSign$''',
 ]
+
+[[allowlists]]
+description = "Type annotation false positive in synthetic test fixtures (reviewed 2026-10-13, PR #10 security)"
+condition = "AND"
+regexTarget = "secret"
+# apps/api/tests/api/conftest.py @ d7c7cd3: "ed_key: ed25519.Ed25519PrivateKey" is a class name, not a key.
+paths = ['''^apps/api/tests/api/conftest\.py$''']
+regexes = ['''^ed25519\.Ed25519PrivateKey$''']

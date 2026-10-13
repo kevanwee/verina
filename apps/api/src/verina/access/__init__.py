@@ -1,6 +1,7 @@
 """Tenancy, trusted identity and matter authorization (ADR 003, EN-7).
 
-Synthetic and in-memory: no identity vendor, database or HTTP authentication is selected.
+No identity vendor is selected. ``SqlIdentityAdapter`` verifies bearer tokens against a
+configured JWKS and resolves authority from a Verina-owned directory (ADR 007).
 See ``docs/security/ACCESS_MATRIX.md`` for the executable roles x actions matrix.
 """
 
@@ -59,6 +60,11 @@ from verina.access.service import (
     ReviewJob,
     ReviewRunner,
 )
+from verina.access.sql_identity import (
+    IdentityDirectory,
+    IdentityUnavailableError,
+    SqlIdentityAdapter,
+)
 from verina.access.sql_repository import SqlMatterRepository
 from verina.access.storage_codec import StoredMatterError
 
@@ -79,6 +85,8 @@ __all__ = [
     "DenialDetail",
     "ExportClearance",
     "IdentityAdapter",
+    "IdentityDirectory",
+    "IdentityUnavailableError",
     "InMemoryIdentityAdapter",
     "InMemoryLedgerStatus",
     "InMemoryMatterRepository",
@@ -103,6 +111,7 @@ __all__ = [
     "ReviewJob",
     "ReviewRunner",
     "Role",
+    "SqlIdentityAdapter",
     "SqlMatterMutationUnitOfWork",
     "SqlMatterRepository",
     "StoredMatterError",

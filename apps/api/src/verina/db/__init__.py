@@ -5,17 +5,70 @@ from ``VERINA_DATABASE_URL``. Schema changes go through Alembic only
 (``verina/db/migrations``); application code never calls ``metadata.create_all``.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Connection, Engine, create_engine, event
 from sqlalchemy.engine import make_url
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
+
+_ACTIVE_CONNECTION: ContextVar[Connection | None] = ContextVar(
+    "verina_active_connection", default=None
+)
+
+
+@contextmanager
+def bind_connection(conn: Connection) -> Iterator[Connection]:
+    """Expose ``conn`` to same-engine readers running inside its transaction.
+
+    A repository transaction binds its connection so that a collaborator called from
+    inside it (the identity directory re-check in a durable mutation) reads on the *same*
+    transaction instead of opening a second one. On SQLite a second ``BEGIN IMMEDIATE``
+    would wait for the first; on PostgreSQL the shared transaction lets the directory row
+    be locked until the mutation commits. The binding is task/thread-local (``ContextVar``).
+    """
+    token = _ACTIVE_CONNECTION.set(conn)
+    try:
+        yield conn
+    finally:
+        _ACTIVE_CONNECTION.reset(token)
+
+
+_REQUIRE_BOUND: ContextVar[Engine | None] = ContextVar("verina_require_bound", default=None)
+
+
+@contextmanager
+def require_bound_connection(engine: Engine) -> Iterator[None]:
+    """Declare that same-engine collaborators must read on the bound transaction.
+
+    Used around authorization callbacks inside a durable mutation: a reader that finds no
+    bound connection must fail closed instead of silently opening its own transaction.
+    """
+    token = _REQUIRE_BOUND.set(engine)
+    try:
+        yield
+    finally:
+        _REQUIRE_BOUND.reset(token)
+
+
+def bound_connection_required(engine: Engine) -> bool:
+    return _REQUIRE_BOUND.get() is engine
+
+
+def active_connection(engine: Engine) -> Connection | None:
+    """The bound connection when it belongs to ``engine`` and its transaction is open."""
+    conn = _ACTIVE_CONNECTION.get()
+    if conn is None or conn.engine is not engine or not conn.in_transaction():
+        return None
+    return conn
 
 
 def normalise_url(url: str) -> str:
