@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verina"
+version = "0.0.1"
+description = "Verina API: verified AI workbench for contract review"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.143,<0.144",
+  "uvicorn[standard]>=0.54,<0.55",
+  "pydantic>=2.14,<3",
+  "pydantic-settings>=2.15,<3",
+  "httpx>=0.28,<0.29",
+  "anthropic>=1.13,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.1,<10",
+  "pytest-cov>=7.1,<8",
+  "ruff>=0.17,<0.18",
+  "mypy>=2.4,<3",
+  # Starlette's TestClient prefers httpx2; plain httpx triggers a StarletteDeprecationWarning.
+  "httpx2>=2.13,<3",
+  # Security tooling (EN-2): dependency audit + SAST. Run via scripts/check.(sh|ps1) and CI.
+  "pip-audit>=2.10,<3",
+  "bandit>=1.9,<2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+verina = ["py.typed", "ai/templates/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "story(id): links a test to backlog ids, e.g. story(\"US-7\") (docs/testing/TRACEABILITY.md)",
+]
+# Warnings raised from (or attributed by stacklevel to) our own code fail the run.
+# Third-party warnings stay visible in the summary but do not fail the build.
+# See docs/testing/TEST_STRATEGY.md section "Warnings policy".
+filterwarnings = [
+  "default",
+  "error:::verina.*",
+  "error:::tests.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["verina", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.coverage.run]
+source = ["verina"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]

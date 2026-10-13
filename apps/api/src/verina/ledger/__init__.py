@@ -1,0 +1,1 @@
+"""Verina ledger package (placeholder)."""

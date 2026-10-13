@@ -1,0 +1,21 @@
+{
+  "name": "verina",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Verified AI workbench for contract review",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace @verina/web",
+    "test:web": "npm run test --workspace @verina/web",
+    "lint:web": "npm run lint --workspace @verina/web",
+    "typecheck:web": "npm run typecheck --workspace @verina/web",
+    "build:web": "npm run build --workspace @verina/web"
+  }
+}
