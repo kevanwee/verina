@@ -1,0 +1,51 @@
+# ---- CONFIDENTIAL: never commit or push ----
+# Product spec, market research, backlog, sprints, handoffs and the master prompt.
+# Enforced twice: here, and by .githooks/pre-commit.
+/private/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Client / test documents with real data must never enter the repo
+/samples-real/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Claude Code local state
+.claude/settings.local.json
+
+# Local SQLite databases (unit/dev only)
+*.db
+*.sqlite3
+
+# Impeccable review screenshots (regenerated)
+apps/web/.impeccable/review/
