@@ -1,0 +1,14 @@
+flowchart LR
+  Lawyer["Person: lawyer / reviewer"]
+  Admin["Person: firm administrator<br/>Planned authenticated role"]
+  Verina["Software system: Verina<br/>Synthetic UI and local API skeleton"]
+  Provider["External system: model provider<br/>Live transport DISABLED"]
+  IdP["External system: customer identity provider<br/>Planned; not selected"]
+  Authority["External systems: legal authority sources<br/>Planned; no connector implemented"]
+  Lawyer -->|Views synthetic demo| Verina
+  Admin -.->|Planned tenant administration| Verina
+  Verina -.->|Planned identity verification| IdP
+  Verina -.->|Future reviewed redacted requests only| Provider
+  Verina -.->|Future citation identifiers only| Authority
+  classDef planned fill:#fff6df,stroke:#93713b,stroke-dasharray:5 4,color:#33270e
+  class Admin,Provider,IdP,Authority planned
