@@ -1,6 +1,6 @@
 # Access matrix (executable)
 
-Owner: verina-engineer; local hardening and source review: security agent; integrated QA and hosted CI pending Â· Policy version `2026-10-13.2` Â· Backlog: EN-7, US-3, US-23 Â· Decision record: [ADR 003](../adr/003-tenant-matter-authorization-boundary.md)
+Owner: verina-engineer; source reviews: security and QA agents; current hosted CI required | Policy version `2026-10-13.3` | Backlog: EN-7, US-3, US-23 | Decision record: [ADR 003](../adr/003-tenant-matter-authorization-boundary.md)
 
 This table is the specification of `verina.access.policy.MatterAccessPolicy`. The test `apps/api/tests/access/test_access_matrix.py` parses every row between the markers below and asserts the policy's decision and reason code. Changing a row without changing the code (or the reverse) fails CI. Every action and every role must appear in at least one row.
 
