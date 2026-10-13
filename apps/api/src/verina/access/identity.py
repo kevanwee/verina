@@ -89,7 +89,8 @@ class InMemoryIdentityAdapter:
         self._accounts[key] = _Account(*key, roles=frozenset(Role(r) for r in roles))
         self._by_token[token] = key
         principal = self.current(*key)
-        assert principal is not None  # noqa: S101 - just registered
+        if principal is None:
+            raise AuthenticationError()
         return principal
 
     def set_roles(self, tenant_id: TenantId, actor_id: ActorId, roles: Iterable[Role]) -> None:

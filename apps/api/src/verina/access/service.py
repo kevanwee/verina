@@ -204,7 +204,8 @@ class MatterService:
         principal, access = await self._authorize(
             principal, Action.MANAGE_MEMBERSHIP, matter_id, target_actor=target
         )
-        assert target is not None  # noqa: S101 - policy denies a missing target
+        if target is None:
+            raise AccessDenied(ReasonCode.TARGET_REQUIRED)
         record = self._content(principal, access)
         self._persist(
             principal, replace(record, access=replace(access, members=access.members | {target}))
@@ -331,7 +332,8 @@ class MatterService:
         )
         if not decision.allowed:
             raise AccessDenied(decision.reason_code)
-        assert access is not None  # noqa: S101 - the policy denies a missing matter
+        if access is None:
+            raise AccessDenied(ReasonCode.MATTER_NOT_ACCESSIBLE)
         # Audit persistence yields to other tasks. Re-read all authority after it returns;
         # no await is allowed between this final check and the in-memory operation.
         current = self._identity.current(principal.tenant_id, principal.actor_id)
@@ -345,7 +347,8 @@ class MatterService:
         if not final.allowed:
             await self._emit(current, action, requested, final)
             raise AccessDenied(final.reason_code)
-        assert fresh is not None  # noqa: S101 - the final policy denies absent matters
+        if fresh is None:
+            raise AccessDenied(ReasonCode.MATTER_NOT_ACCESSIBLE)
         return current, fresh
 
     async def _authorize_collection(self, principal: Principal, action: Action) -> Principal:

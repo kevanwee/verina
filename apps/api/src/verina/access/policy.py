@@ -137,7 +137,8 @@ class MatterAccessPolicy:
         visibility = self._visibility(principal, matter)
         if visibility is not None:
             return Decision.deny(ReasonCode.MATTER_NOT_ACCESSIBLE, visibility)
-        assert matter is not None  # noqa: S101 - narrowed by _visibility
+        if matter is None:
+            return Decision.deny(ReasonCode.MATTER_NOT_ACCESSIBLE)
 
         if not role_ok:
             return Decision.deny(ReasonCode.ROLE_NOT_PERMITTED)
