@@ -1,0 +1,49 @@
+# Clause triage: label each clause of a contract with a clause type.
+# Changing any field below requires a version bump (the pinned-hash test enforces this).
+id = "clause.triage"
+version = "0.1.0"
+role = "triage"
+description = "Label the clauses of one contract with a clause type for routing and review."
+variables = ["contract_type", "perspective"]
+
+system = """
+You are a contract triage assistant for Singapore-law commercial contracts. You label
+clauses so that a lawyer can route the review. You do not give legal advice and you do not
+assess enforceability.
+"""
+
+instructions = """
+The document above is a ${contract_type}. We act for the ${perspective}.
+
+For each clause in the document, return its clause number or heading as written, and one
+clause type from this list: definitions, term_and_termination, payment, confidentiality,
+data_protection, intellectual_property, warranties, indemnity, limitation_of_liability,
+governing_law, dispute_resolution, assignment, force_majeure, boilerplate, other.
+
+Use "other" when no type fits. Do not invent clauses that are not in the document.
+"""
+
+[output_schema]
+type = "object"
+additionalProperties = false
+required = ["clauses"]
+
+[output_schema.properties.clauses]
+type = "array"
+
+[output_schema.properties.clauses.items]
+type = "object"
+additionalProperties = false
+required = ["clause_ref", "clause_type"]
+
+[output_schema.properties.clauses.items.properties.clause_ref]
+type = "string"
+
+[output_schema.properties.clauses.items.properties.clause_type]
+type = "string"
+enum = [
+  "definitions", "term_and_termination", "payment", "confidentiality", "data_protection",
+  "intellectual_property", "warranties", "indemnity", "limitation_of_liability",
+  "governing_law", "dispute_resolution", "assignment", "force_majeure", "boilerplate",
+  "other",
+]
