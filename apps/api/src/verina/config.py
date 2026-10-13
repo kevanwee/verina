@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     env: Literal["local", "test", "staging", "production"] = "local"
     log_level: str = "INFO"
     allowed_origins: list[str] = ["http://localhost:3000"]
-    database_url: str = "sqlite:///./verina-local.db"
+    # SQLAlchemy URL (ADR 004). Local default is a SQLite file under the git-ignored
+    # .data/ directory; CI points this at PostgreSQL (postgresql+psycopg://...).
+    database_url: str = "sqlite:///./.data/verina-local.db"
+    # Optional key (>= 32 bytes) for the audit chain-head HMAC (ADR 004). Without it, tail
+    # truncation plus a consistent head rewind by a database writer is not detectable.
+    audit_head_key: SecretStr | None = None
 
     # --- AI orchestrator (verina.ai) -------------------------------------------------
     # The key is a SecretStr so it is masked in repr/str/model_dump. Supply it only via

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from verina.ai import (
+    AuditSink,
     FakeModelClient,
     InMemoryAuditSink,
     ModelRegistry,
@@ -34,7 +35,7 @@ def sink() -> InMemoryAuditSink:
 
 def make_orchestrator(
     client: FakeModelClient,
-    sink: InMemoryAuditSink,
+    sink: AuditSink,
     settings: Settings,
     *,
     redaction: bool = True,

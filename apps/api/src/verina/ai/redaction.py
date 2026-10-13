@@ -56,15 +56,27 @@ def nric_checksum_valid(value: str) -> bool:
 _PLACEHOLDER_RE: Final = re.compile(r"\[([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)_(\d+)\]")
 
 
+class RedactionError(ValueError):
+    """Input cannot be safely distinguished from issued redaction placeholders."""
+
+
 class RedactionMapping:
     """Placeholder <-> original value table for one orchestrator run. Process-local only."""
 
-    __slots__ = ("_by_original", "_by_placeholder", "_counters")
+    __slots__ = ("_by_original", "_by_placeholder", "_counters", "_reserved")
 
     def __init__(self) -> None:
         self._by_placeholder: dict[str, str] = {}
         self._by_original: dict[tuple[str, str], str] = {}
         self._counters: dict[str, int] = {}
+        self._reserved: set[str] = set()
+
+    def reserve_source_placeholders(self, text: str) -> None:
+        """Keep source literals distinct from issued tokens; ambiguous later input fails."""
+        literals = {match.group(0) for match in _PLACEHOLDER_RE.finditer(text)}
+        if literals.intersection(self._by_placeholder):
+            raise RedactionError("source placeholder conflicts with an issued redaction token")
+        self._reserved.update(literals)
 
     def placeholder_for(self, category: str, original: str) -> str:
         """Return the placeholder for ``original``, issuing a new one on first sight."""
@@ -73,6 +85,8 @@ class RedactionMapping:
         if existing is not None:
             return existing
         n = self._counters.get(category, 0) + 1
+        while f"[{category}_{n}]" in self._reserved:
+            n += 1
         self._counters[category] = n
         placeholder = f"[{category}_{n}]"
         self._by_original[key] = placeholder
@@ -84,7 +98,10 @@ class RedactionMapping:
 
     def counts(self) -> dict[str, int]:
         """Number of distinct values redacted per category (safe to log or audit)."""
-        return dict(sorted(self._counters.items()))
+        counts: dict[str, int] = {}
+        for category, _original in self._by_original:
+            counts[category] = counts.get(category, 0) + 1
+        return dict(sorted(counts.items()))
 
     def __len__(self) -> int:
         return len(self._by_placeholder)
@@ -192,6 +209,7 @@ class RegexRedactor:
         self, text: str, mapping: RedactionMapping | None = None
     ) -> tuple[str, RedactionMapping]:
         mapping = mapping if mapping is not None else RedactionMapping()
+        mapping.reserve_source_placeholders(text)
         spans: list[tuple[int, int, RedactionRule]] = []
         for rule in self._rules:
             for match in rule.pattern.finditer(text):
