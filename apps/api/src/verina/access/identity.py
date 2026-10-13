@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from verina.access.domain import ActorId, Role, TenantId
+from verina.access.domain import ActorId, ActorProfile, Role, TenantId, _issue_profile
 
 _ISSUER = object()
 
@@ -55,6 +55,10 @@ class IdentityAdapter(Protocol):
         """Resolve a principal from the credential only. Raise :class:`AuthenticationError`."""
         ...
 
+    def profile(self, tenant_id: TenantId, actor_id: ActorId) -> ActorProfile | None:
+        """Retrieve a trusted identity binding, retained after deactivation."""
+        ...
+
     def current(self, tenant_id: TenantId, actor_id: ActorId) -> Principal | None:
         """Return the principal's *current* state (roles may have changed), or ``None`` if
         the actor was deactivated. Used to re-evaluate queued work at execution time."""
@@ -77,21 +81,33 @@ class InMemoryIdentityAdapter:
     """
 
     def __init__(self) -> None:
+        self._profiles: dict[tuple[TenantId, ActorId], ActorProfile] = {}
         self._by_token: dict[str, tuple[TenantId, ActorId]] = {}
         self._accounts: dict[tuple[TenantId, ActorId], _Account] = {}
 
     def register(
-        self, token: str, tenant_id: str, actor_id: str, roles: Iterable[Role | str]
+        self,
+        token: str,
+        tenant_id: str,
+        actor_id: str,
+        roles: Iterable[Role | str],
+        *,
+        display_name: str | None = None,
     ) -> Principal:
         if not token:
             raise ValueError("token required")
         key = (TenantId(tenant_id), ActorId(actor_id))
+        if display_name is not None:
+            self._profiles[key] = _issue_profile(*key, display_name)
         self._accounts[key] = _Account(*key, roles=frozenset(Role(r) for r in roles))
         self._by_token[token] = key
         principal = self.current(*key)
         if principal is None:
             raise AuthenticationError()
         return principal
+
+    def profile(self, tenant_id: TenantId, actor_id: ActorId) -> ActorProfile | None:
+        return self._profiles.get((tenant_id, actor_id))
 
     def set_roles(self, tenant_id: TenantId, actor_id: ActorId, roles: Iterable[Role]) -> None:
         self._accounts[(tenant_id, actor_id)].roles = frozenset(roles)

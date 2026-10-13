@@ -8,6 +8,7 @@ import pytest
 
 from verina.access import (
     ActorId,
+    ConflictCheckRecord,
     ConflictStatus,
     InMemoryIdentityAdapter,
     InMemoryLedgerStatus,
@@ -171,11 +172,27 @@ class World:
 def build_world() -> World:
     identity = InMemoryIdentityAdapter()
     principals = {
-        actor: identity.register(token, tenant.value, actor, roles)
+        actor: identity.register(
+            token, tenant.value, actor, roles, display_name=f"Synthetic {actor}"
+        )
         for token, tenant, actor, roles in USERS
     }
     repo = SpyRepository()
     for record in seed_matters():
+        # These are explicitly invented checks, not a migration of operational records.
+        from dataclasses import replace
+
+        if record.access.conflict_status in {ConflictStatus.CLEAR, ConflictStatus.CONFLICT}:
+            actor = ActorId("a-lawyer" if record.tenant_id == TENANT_A else "b-partner")
+            profile = identity.profile(record.tenant_id, actor)
+            assert profile is not None
+            check = ConflictCheckRecord(
+                record.matter_id, record.access.conflict_status, actor, FIXED_NOW, 1, profile
+            )
+            record = replace(
+                record,
+                access=replace(record.access, conflict_recorded_by=actor, conflict_check=check),
+            )
         repo.add(record.tenant_id, record)
     repo.calls.clear()
     ledger = InMemoryLedgerStatus()

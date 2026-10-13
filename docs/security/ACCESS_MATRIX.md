@@ -23,7 +23,7 @@ Scope: synthetic, in-memory. No identity provider, database or HTTP authenticati
 3. Matter visibility: exists in the caller's tenant, caller not walled, caller is a member. Ethical walls override membership and every role.
 4. A role held by the caller grants the action. Tenant administration grants no matter content.
 5. Membership changes cannot target the caller (self-escalation).
-6. The conflict gate blocks review, model context, attestation and export until the result is `clear` or `waived`, independently of membership.
+6. The conflict gate blocks review, model context, attestation and export until a valid named UTC check record is `clear`, or its current version has a valid named reasoned waiver, independently of membership. Bare status flags do not establish readiness.
 7. Waivers and attestations require a non-blank reason (at most 2000 characters).
 8. Export requires every ledger entry to be verified or attested. A ledger-status failure denies.
 
@@ -121,6 +121,15 @@ The service re-resolves the principal and re-reads the access record on every ca
 | M85 | requester | non-member | read_status | deny | matter_not_accessible | SEC |
 | M86 | requester | walled-member | read_status | deny | matter_not_accessible | SEC |
 | M87 | requester | member | list_matters | deny | role_not_permitted | SEC |
+| M88 | lawyer | none | create_matter | allow | allowed | Synthetic foundation proposal |
+| M89 | requester | none | create_matter | deny | role_not_permitted | Synthetic foundation proposal |
+| M90 | tenant_admin | none | create_matter | deny | role_not_permitted | Synthetic foundation proposal |
+| M91 | lawyer | member conflict=pending | record_conflict_check | allow | allowed | Synthetic foundation proposal |
+| M92 | requester | member | record_conflict_check | deny | role_not_permitted | SEC |
+| M93 | knowledge | member | record_conflict_check | deny | role_not_permitted | SEC |
+| M94 | lawyer | non-member | record_conflict_check | deny | matter_not_accessible | SEC |
+| M95 | partner | walled-member | record_conflict_check | deny | matter_not_accessible | SEC |
+| M96 | lawyer | other-tenant | record_conflict_check | deny | matter_not_accessible | SEC |
 <!-- matrix:end -->
 
 ## Forbidden transitions and service-level checks
@@ -144,3 +153,12 @@ Authorization is rechecked after awaited audit emission and collections are quer
 Unknown or malformed ledger status fails closed. An explicitly checked empty ledger is represented by a known status with zero entries, never by an absent record or empty mapping. A future durable ledger must bind coverage and attestation to the exact document/output revision. Current attestation and export objects are authorization scaffolding: they do not persist legal attestation or deliver a client artifact.
 
 The identity adapter and repository are synthetic and in-memory; no HTTP auth, uploaded client documents, live model transport or durable matter service is enabled. The public synthetic preview remains a separate release boundary.
+
+
+## Local/test synthetic recording foundation
+
+`create_matter` and `record_conflict_check` are application methods only. The API remains health-only. Creation is limited to current lawyer/partner roles with a trusted synthetic profile, derives tenant/actor/opaque ID, starts pending, and grants membership only to the creator. This is a controlled engineering default, not production provisioning policy or requester submission.
+
+A conflict record snapshots its trusted profile, UTC time, CLEAR/CONFLICT result and positive integer version and typed target matter ID. Evidence from one matter cannot unlock another. Replacing it increments the version and removes the prior waiver. Waivers retain member-lawyer authority including visible self-waivers, and bind to the current recorded hit and matter. Check/status/waiver changes during awaited audit reject recording or waiver with `conflict_changed`; the caller must refresh and explicitly retry rather than silently act on another check. Readiness rejects inconsistent/raw/missing provenance, stale waivers and malformed time/version. Names do not grant authority; historical profile snapshots remain valid after rename/deactivation, while new actions always use current identity.
+
+Requester `ready` means ready at the conflict stage only, not resolved ledger, reviewed advice or approved delivery. No recorder/title/reason appears in this projection or access audit payload. Audit decisions remain permission evidence; repository failure after allow is not a successful mutation receipt. Matter/check/profile state is process-local and can disappear while SQL audit remains. Durable history, revision-bound matter transactions/outcomes, declined lifecycle, real IdP/HTTP, requester assignment and client uploads remain unfinished.

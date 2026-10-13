@@ -27,16 +27,22 @@ from uuid import UUID, uuid4
 from verina.access.domain import (
     Action,
     ActorId,
+    ActorProfile,
+    ConflictCheckRecord,
     ConflictStatus,
     ConflictWaiver,
     Decision,
     DenialDetail,
     MatterAccess,
+    MatterContent,
     MatterDocument,
     MatterId,
     MatterRecord,
     ReasonCode,
     TenantId,
+    conflict_is_ready,
+    is_utc_time,
+    profile_matches,
 )
 from verina.access.identity import IdentityAdapter, Principal
 from verina.access.policy import POLICY_VERSION, MatterAccessPolicy
@@ -138,6 +144,83 @@ class MatterService:
         self._runner = review_runner
         self._clock = clock
 
+    async def create_matter(self, principal: Principal, title: str) -> MatterId:
+        """Local/test synthetic foundation. Creator membership only; no HTTP wiring."""
+        if not isinstance(title, str) or not 0 < len(title.strip()) <= 200:
+            raise ValueError("invalid title")
+        principal = await self._authorize_collection(principal, Action.CREATE_MATTER)
+        self._profile(principal)
+        matter_id = MatterId(str(uuid4()))
+        await self._emit(principal, Action.CREATE_MATTER, matter_id.value, Decision.allow())
+        principal = await self._recheck_collection(principal, Action.CREATE_MATTER)
+        self._profile(principal)
+        record = MatterRecord(
+            MatterAccess(principal.tenant_id, matter_id, members=frozenset({principal.actor_id})),
+            MatterContent(title.strip()),
+        )
+        self._repo.add(principal.tenant_id, record)
+        return matter_id
+
+    async def record_conflict_check(
+        self, principal: Principal, matter_id: str, result: ConflictStatus
+    ) -> ConflictCheckRecord:
+        """Record a lawyer's synthetic result, replacing and invalidating any old waiver."""
+        if type(result) is not ConflictStatus or result not in {
+            ConflictStatus.CLEAR,
+            ConflictStatus.CONFLICT,
+        }:
+            raise ValueError("invalid conflict result")
+        principal, access = await self._authorize(
+            principal, Action.RECORD_CONFLICT_CHECK, matter_id
+        )
+        profile = self._profile(principal)
+        previous = access.conflict_check
+        if previous is not None and (
+            not isinstance(previous, ConflictCheckRecord)
+            or type(previous.version) is not int
+            or previous.version <= 0
+        ):
+            raise ValueError("invalid conflict record")
+        version = previous.version + 1 if previous is not None else 1
+        check = ConflictCheckRecord(
+            access.matter_id, result, principal.actor_id, self._utc_now(), version, profile
+        )
+        record = self._content(principal, access)
+        new_access = replace(
+            access,
+            conflict_status=result,
+            conflict_recorded_by=principal.actor_id,
+            conflict_check=check,
+            waiver=None,
+        )
+        self._persist(principal, replace(record, access=new_access))
+        return check
+
+    def _named_decision(self, principal: Principal, action: Action, decision: Decision) -> Decision:
+        if decision.allowed and action in {
+            Action.CREATE_MATTER,
+            Action.RECORD_CONFLICT_CHECK,
+            Action.WAIVE_CONFLICT,
+        }:
+            profile = self._identity.profile(principal.tenant_id, principal.actor_id)
+            if not profile_matches(profile, principal.tenant_id, principal.actor_id):
+                return Decision.deny(ReasonCode.PROFILE_REQUIRED)
+        return decision
+
+    def _profile(self, principal: Principal) -> ActorProfile:
+        profile = self._identity.profile(principal.tenant_id, principal.actor_id)
+        if not profile_matches(profile, principal.tenant_id, principal.actor_id):
+            raise AccessDenied(ReasonCode.PROFILE_REQUIRED)
+        if profile is None:
+            raise AccessDenied(ReasonCode.PROFILE_REQUIRED)
+        return profile
+
+    def _utc_now(self) -> datetime:
+        now = self._clock()
+        if not is_utc_time(now):
+            raise ValueError("invalid clock")
+        return now
+
     # ------------------------------------------------------------------ reads
 
     async def get_matter(self, principal: Principal, matter_id: str) -> MatterRecord:
@@ -146,11 +229,7 @@ class MatterService:
 
     async def get_matter_status(self, principal: Principal, matter_id: str) -> MatterStatus:
         _, access = await self._authorize(principal, Action.READ_STATUS, matter_id)
-        status = (
-            "ready"
-            if access.conflict_status in {ConflictStatus.CLEAR, ConflictStatus.WAIVED}
-            else "awaiting_clearance"
-        )
+        status = "ready" if conflict_is_ready(access) else "awaiting_clearance"
         return MatterStatus(access.matter_id, status)
 
     async def list_matters(self, principal: Principal) -> list[MatterSummary]:
@@ -218,10 +297,20 @@ class MatterService:
         principal, access = await self._authorize(
             principal, Action.WAIVE_CONFLICT, matter_id, reason=reason
         )
+        profile = self._profile(principal)
+        check = access.conflict_check
+        if check is None:
+            raise AccessDenied(ReasonCode.CONFLICT_NOT_WAIVABLE)
+        now = self._utc_now()
+        if now < check.recorded_at:
+            raise ValueError("invalid clock")
         waiver = ConflictWaiver(
+            matter_id=access.matter_id,
+            check_version=check.version,
+            actor_profile=profile,
             waived_by=principal.actor_id,
             reason=reason.strip(),
-            waived_at=self._clock(),
+            waived_at=now,
             same_actor_as_conflict_recorder=access.conflict_recorded_by == principal.actor_id,
         )
         record = self._content(principal, access)
@@ -317,6 +406,7 @@ class MatterService:
         decision = self._policy.decide(
             principal, action, access, reason=reason, target_actor=target_actor
         )
+        decision = self._named_decision(principal, action, decision)
         same_actor = (
             access.conflict_recorded_by == principal.actor_id
             if action is Action.WAIVE_CONFLICT and access is not None and decision.allowed
@@ -344,6 +434,16 @@ class MatterService:
         final = self._policy.decide(
             current, action, fresh, reason=reason, target_actor=target_actor
         )
+        final = self._named_decision(current, action, final)
+        if (
+            final.allowed
+            and action in {Action.WAIVE_CONFLICT, Action.RECORD_CONFLICT_CHECK}
+            and access is not None
+            and fresh is not None
+            and (fresh.conflict_check, fresh.conflict_status, fresh.waiver)
+            != (access.conflict_check, access.conflict_status, access.waiver)
+        ):
+            final = Decision.deny(ReasonCode.CONFLICT_CHANGED)
         if not final.allowed:
             await self._emit(current, action, requested, final)
             raise AccessDenied(final.reason_code)
@@ -353,7 +453,9 @@ class MatterService:
 
     async def _authorize_collection(self, principal: Principal, action: Action) -> Principal:
         principal = await self._refresh(principal, action, None)
-        decision = self._policy.decide(principal, action, None)
+        decision = self._named_decision(
+            principal, action, self._policy.decide(principal, action, None)
+        )
         if not decision.allowed:
             await self._emit(principal, action, None, decision)
             raise AccessDenied(decision.reason_code)
@@ -365,7 +467,7 @@ class MatterService:
         if current is None:
             await self._emit_inactive(principal.tenant_id, principal.actor_id, action, None)
             raise AccessDenied(ReasonCode.UNAUTHENTICATED)
-        decision = self._policy.decide(current, action, None)
+        decision = self._named_decision(current, action, self._policy.decide(current, action, None))
         if not decision.allowed:
             await self._emit(current, action, None, decision)
             raise AccessDenied(decision.reason_code)

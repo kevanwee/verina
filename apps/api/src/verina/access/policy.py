@@ -32,15 +32,19 @@ from verina.access.domain import (
     ReasonCode,
     Role,
     TenantId,
+    conflict_is_ready,
+    conflict_record_is_valid,
 )
 from verina.access.identity import Principal
 
-POLICY_VERSION = "2026-10-13.2"
+POLICY_VERSION = "2026-10-13.3"
 
 _CONTENT_READERS = frozenset({Role.LAWYER, Role.PARTNER, Role.KNOWLEDGE})
 _LAWYERS = frozenset({Role.LAWYER, Role.PARTNER})
 
 GRANTS: Mapping[Action, frozenset[Role]] = {
+    Action.CREATE_MATTER: _LAWYERS,
+    Action.RECORD_CONFLICT_CHECK: _LAWYERS,
     Action.READ_MATTER: _CONTENT_READERS,
     Action.READ_STATUS: _CONTENT_READERS | {Role.REQUESTER},
     Action.LIST_MATTERS: _CONTENT_READERS,
@@ -57,7 +61,7 @@ GRANTS: Mapping[Action, frozenset[Role]] = {
 }
 """Which roles may perform each action. An action missing here is denied to everyone."""
 
-TENANT_ACTIONS = frozenset({Action.MANAGE_TENANT})
+TENANT_ACTIONS = frozenset({Action.MANAGE_TENANT, Action.CREATE_MATTER})
 """Actions that never concern a matter; a matter argument is ignored."""
 
 COLLECTION_ACTIONS = frozenset({Action.LIST_MATTERS, Action.SEARCH})
@@ -149,11 +153,11 @@ class MatterAccessPolicy:
             if target_actor == principal.actor_id:
                 return Decision.deny(ReasonCode.SELF_ESCALATION)
 
-        if action in CONFLICT_GATED and matter.conflict_status not in CONFLICT_CLEARED:
+        if action in CONFLICT_GATED and not conflict_is_ready(matter):
             return Decision.deny(ReasonCode.CONFLICT_NOT_CLEARED)
-        if (
-            action is Action.WAIVE_CONFLICT
-            and matter.conflict_status is not ConflictStatus.CONFLICT
+        if action is Action.WAIVE_CONFLICT and (
+            matter.conflict_status is not ConflictStatus.CONFLICT
+            or not conflict_record_is_valid(matter)
         ):
             return Decision.deny(ReasonCode.CONFLICT_NOT_WAIVABLE)
 
