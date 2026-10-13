@@ -1,0 +1,319 @@
+/* Workspace shell. Layout and page-level components; tokens from globals.css. */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--color-bg);
+  border-bottom: var(--rule-width) solid var(--color-rule);
+}
+
+.topbarInner,
+.main,
+.footer {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: var(--space-8);
+}
+
+.topbarInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  min-height: 3.5rem;
+}
+
+.wordmark {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.nav ul {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.nav a {
+  display: inline-block;
+  padding-block: var(--space-3); /* 44px touch target */
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.nav a:hover {
+  color: var(--color-ink);
+  text-decoration: underline;
+}
+
+.main {
+  padding-block: var(--space-12) var(--space-16);
+}
+
+.main:focus {
+  outline: none;
+}
+
+/* Two work areas: context on the left, the ledger on the right. */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 23rem) minmax(0, 1fr);
+  gap: var(--space-16);
+  align-items: start;
+}
+
+.intro {
+  display: grid;
+  gap: var(--space-5);
+  position: sticky;
+  top: calc(3.5rem + var(--space-8));
+}
+
+.statement {
+  font-size: var(--text-xl);
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+.lede {
+  color: var(--color-ink-muted);
+  max-width: 40ch;
+}
+
+/* Matter context */
+
+.matter {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  background: var(--color-surface);
+  border: var(--rule-width) solid var(--color-rule);
+  border-radius: var(--radius);
+}
+
+.matterTitle {
+  font-size: var(--text-base);
+  line-height: var(--leading-ui);
+}
+
+.synthetic {
+  margin-top: calc(var(--space-3) * -1);
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.facts dt {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+}
+
+.facts dd {
+  font-size: var(--text-sm);
+}
+
+.gate {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: var(--rule-width) solid var(--color-rule);
+}
+
+.gateReason {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.gateIcon {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin-top: 0.15em;
+  color: var(--status-contradicted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.buttonPrimary,
+.buttonLocked {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.buttonPrimary {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border: var(--rule-width) solid var(--color-accent);
+}
+
+.buttonPrimary:hover {
+  color: var(--color-on-accent);
+  background: var(--color-accent-hover);
+  text-decoration: none;
+}
+
+.buttonPrimary:active {
+  transform: translateY(1px);
+}
+
+/* Locked, not just disabled: it stays focusable so the reason is announced. */
+.buttonLocked {
+  color: var(--color-ink-muted);
+  background: var(--color-surface-sunk);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  cursor: not-allowed;
+}
+
+.buttonIcon {
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin-inline-end: var(--space-2);
+  flex: none;
+}
+
+/* Ledger */
+
+.ledger {
+  min-width: 0;
+}
+
+.ledgerHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--rule-width) solid var(--color-rule-strong);
+}
+
+.sectionHeading {
+  font-size: var(--text-lg);
+}
+
+.count {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+}
+
+.entries > li + li {
+  border-top: var(--rule-width) solid var(--color-rule);
+}
+
+/* Legend */
+
+.legend {
+  margin-top: var(--space-16);
+  padding-top: var(--space-10);
+  border-top: var(--rule-width) solid var(--color-rule);
+  display: grid;
+  gap: var(--space-8);
+}
+
+.legendGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-16);
+}
+
+.legendSubhead {
+  font-size: var(--text-base);
+  margin-bottom: var(--space-4);
+}
+
+.legendList {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.legendRow {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+}
+
+.legendRow dd {
+  font-size: var(--text-sm);
+  max-width: 48ch;
+}
+
+.footer {
+  padding-block: var(--space-8);
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+.footer p {
+  padding-top: var(--space-6);
+  border-top: var(--rule-width) solid var(--color-rule);
+}
+
+/* Narrower desktop and tablet: stack the work areas. */
+@media (max-width: 64rem) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-10);
+  }
+
+  .intro {
+    position: static;
+    max-width: 44rem;
+  }
+
+  .legendGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-10);
+  }
+}
+
+/* Phone */
+@media (max-width: 40rem) {
+  .topbarInner,
+  .main,
+  .footer {
+    padding-inline: var(--space-4);
+  }
+
+  .main {
+    padding-block: var(--space-8) var(--space-12);
+  }
+
+  .legendRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+}

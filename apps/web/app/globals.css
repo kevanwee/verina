@@ -1,0 +1,285 @@
+/*
+ * Verina design tokens, v0.
+ * Source of truth for the token table in docs/design/DESIGN_SYSTEM.md.
+ * Contrast ratios for every text/background pair are recorded there (WCAG 2.2 AA, both themes).
+ *
+ * Theme selection:
+ *   - default: follows the OS (`prefers-color-scheme`)
+ *   - `<html data-theme="light">` or `<html data-theme="dark">` forces a theme
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Type families (set by next/font in app/layout.tsx) */
+  --font-ui: var(--font-atkinson), "Segoe UI", system-ui, sans-serif;
+  --font-text: var(--font-literata), Georgia, "Times New Roman", serif;
+
+  /* Type scale: fixed rem, ~1.2 ratio (product UI, not fluid) */
+  --text-xs: 0.75rem; /* 12px  meta, stamp dates */
+  --text-sm: 0.875rem; /* 14px  labels, table meta */
+  --text-base: 1rem; /* 16px  UI body */
+  --text-read: 1.0625rem; /* 17px  legal text (Literata) */
+  --text-lg: 1.25rem; /* 20px  section headings */
+  --text-xl: 1.5rem; /* 24px  page statement */
+  --text-2xl: 2rem; /* 32px  rare: page titles */
+
+  --leading-tight: 1.2;
+  --leading-ui: 1.45;
+  --leading-read: 1.6;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 650;
+
+  --measure-read: 66ch;
+
+  /* Spacing: 4px base */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radii: one system. 4px on everything; 2px only for focus offsets on tight controls. */
+  --radius: 4px;
+  --radius-tight: 2px;
+
+  /* Rules */
+  --rule-width: 1px;
+  --stamp-border-width: 1.5px;
+
+  /* Layering */
+  --z-header: 10;
+
+  /* Motion (mirrors lib/motion.ts) */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- Colour: light ---- */
+  --color-bg: #f6f7f9; /* page ground: cool paper, never cream */
+  --color-surface: #fcfcfd; /* raised work surface */
+  --color-surface-sunk: #eef0f3; /* wells, code, inactive */
+  --color-ink: #1b1f27; /* body text */
+  --color-ink-muted: #505968; /* secondary text */
+  --color-rule: #dde1e6; /* hairlines (decorative separation) */
+  --color-rule-strong: #7d8693; /* control boundaries (>= 3:1) */
+
+  /* Indelible-ink blue: the one accent. Reserved for the human act
+     (attestation, primary action, focus, selection). */
+  --color-accent: #2c3f9e;
+  --color-accent-hover: #22327f;
+  --color-on-accent: #fcfcfd;
+  --color-accent-tint: #eaedf9;
+  --color-focus: #2c3f9e;
+  --color-selection: #d4daf6;
+
+  /* Ledger statuses: fg (text, icon, stamp border) + tint (stamp ground) */
+  --status-verified: #1b6638;
+  --status-verified-tint: #e8f3ec;
+  --status-unsupported: #7f5200;
+  --status-unsupported-tint: #faf0d9;
+  --status-contradicted: #a8242a;
+  --status-contradicted-tint: #faeaea;
+  --status-attested: var(--color-accent);
+  --status-attested-tint: var(--color-accent-tint);
+
+  /* Risk tiers share the status hues; shape and label carry the meaning too */
+  --tier-green: var(--status-verified);
+  --tier-green-tint: var(--status-verified-tint);
+  --tier-yellow: var(--status-unsupported);
+  --tier-yellow-tint: var(--status-unsupported-tint);
+  --tier-red: var(--status-contradicted);
+  --tier-red-tint: var(--status-contradicted-tint);
+}
+
+/* ---- Colour: dark (OS preference, unless light is forced) ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #111419;
+    --color-surface: #181c23;
+    --color-surface-sunk: #0c0e12;
+    --color-ink: #e5e8ed;
+    --color-ink-muted: #a2aab6;
+    --color-rule: #2a303a;
+    --color-rule-strong: #6f7886;
+    --color-accent: #a6b4ff;
+    --color-accent-hover: #c2cbff;
+    --color-on-accent: #111419;
+    --color-accent-tint: #1b2140;
+    --color-focus: #a6b4ff;
+    --color-selection: #2c3670;
+    --status-verified: #7dd19a;
+    --status-verified-tint: #14271c;
+    --status-unsupported: #e7b45a;
+    --status-unsupported-tint: #2a2213;
+    --status-contradicted: #ff9592;
+    --status-contradicted-tint: #311a1b;
+  }
+}
+
+/* ---- Colour: dark (forced) ---- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #111419;
+  --color-surface: #181c23;
+  --color-surface-sunk: #0c0e12;
+  --color-ink: #e5e8ed;
+  --color-ink-muted: #a2aab6;
+  --color-rule: #2a303a;
+  --color-rule-strong: #6f7886;
+  --color-accent: #a6b4ff;
+  --color-accent-hover: #c2cbff;
+  --color-on-accent: #111419;
+  --color-accent-tint: #1b2140;
+  --color-focus: #a6b4ff;
+  --color-selection: #2c3670;
+  --status-verified: #7dd19a;
+  --status-verified-tint: #14271c;
+  --status-unsupported: #e7b45a;
+  --status-unsupported-tint: #2a2213;
+  --status-contradicted: #ff9592;
+  --status-contradicted-tint: #311a1b;
+}
+
+/* ---- Base ---- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scrollbar-color: var(--color-rule-strong) var(--color-bg);
+}
+
+body {
+  min-height: 100dvh;
+  color: var(--color-ink);
+  background: var(--color-bg);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-ui);
+  font-variant-numeric: tabular-nums;
+  caret-color: var(--color-accent);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ol,
+ul,
+dl,
+dd,
+blockquote,
+figure {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: var(--leading-tight);
+  font-weight: var(--weight-semibold);
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+ol,
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+  text-decoration-thickness: 2px;
+}
+
+::selection {
+  background: var(--color-selection);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-tight);
+}
+
+/* Anchor targets clear the sticky header when scrolled to natively. */
+[id] {
+  scroll-margin-top: 4.5rem;
+}
+
+/* Screen-reader-only text. Used to give statuses an explicit spoken prefix. */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-2);
+  z-index: calc(var(--z-header) + 1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
