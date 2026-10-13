@@ -16,8 +16,8 @@ Status values: **Planned** (no test yet) · **Partial** (some criteria covered) 
 | EN-4 | Threat model + data flow + controls v0 | S0 | Document review (no automated test); controls feed `static-*` and `int-*` rows | 0 | n/a (doc) |
 | EN-5 | PDPA assessment + PII taxonomy | S0 | `api-EN-5-01` taxonomy JSON schema-valid; detectors feed `eval-pii` | 1 | Planned |
 | EN-6 | AI orchestrator skeleton + audit hook | S0–S1 | `api-EN-6-*` (`tests/ai/`): every call path records model, version, template id, input hash; fake client and real SDK with explicit in-process mock transport; `static-EN-2-01`/Semgrep ORC-1 rule | 0 | Partial (orchestrator tests pass locally; hosted CI pending) |
-| EN-7 | Tenancy, authn, RBAC, matter ACL | S1 | `int-EN-7-*` generated authz matrix; cross-tenant and no-access fail closed | 1 | Planned |
-| EN-8 | Hash-chained audit log | S1 | `api-EN-8-01` chain verifies; `api-EN-8-02..04` edit, delete, reorder break verification; `int-EN-8-01` integrity API | 1 | Planned |
+| EN-7 | Tenancy, authn, RBAC, matter ACL | S1 | `tests/access/`: executable roles/actions matrix; tenant/wall/identity denials, requester status projection, revocation during audit and queued review, unavailable ledger, durable sink integration | 1 | Partial (local access foundation verified; real IdP, HTTP and durable matter lifecycle remain) |
+| EN-8 | Hash-chained audit log | S1 | `tests/audit/`: migrations, append concurrency, hash/head tamper, tail truncation, replay limit, crash/cancellation, registered access payloads; PostgreSQL matrix configured | 1 | Partial (internal integrity API; authenticated HTTP and external anchor remain) |
 | EN-9 | Golden DOCX corpus + harness | S1–S2 | `golden-EN-9-01..30` round-trip diff = 0 per file | 1 | Planned |
 | EN-10 | 200-clause gold set | S3 | `eval-gold-EN-10` agreement report | 2, 4 | Planned |
 | EN-11 | Red-team set | S5 | `eval-redteam-EN-11` exported-fabrication count = 0 | 3, 4 | Planned |
