@@ -136,3 +136,39 @@ def test_noop_redactor() -> None:
 def test_redactors_satisfy_protocol() -> None:
     assert isinstance(RegexRedactor(), Redactor)
     assert isinstance(NoOpRedactor(), Redactor)
+
+
+def test_source_placeholder_literal_is_not_reidentified() -> None:
+    redactor = RegexRedactor()
+    original = "[EMAIL_1] x@example.com and x@example.com"
+    safe, mapping = redactor.redact(original)
+    assert safe == "[EMAIL_1] [EMAIL_2] and [EMAIL_2]"
+    assert mapping.counts() == {"EMAIL": 1}
+    assert redactor.reidentify(safe, mapping) == original
+
+
+def test_reserves_all_literals_before_first_match_and_across_categories() -> None:
+    redactor = RegexRedactor()
+    original = "x@example.com [EMAIL_1] [EMAIL_2] [NRIC_FIN_1] S1234567D"
+    safe, mapping = redactor.redact(original)
+    assert safe == "[EMAIL_3] [EMAIL_1] [EMAIL_2] [NRIC_FIN_1] [NRIC_FIN_2]"
+    assert mapping.counts() == {"EMAIL": 1, "NRIC_FIN": 1}
+    assert redactor.reidentify(safe, mapping) == original
+
+
+def test_reserved_tokens_and_repeated_values_survive_shared_mapping() -> None:
+    redactor = RegexRedactor()
+    first, mapping = redactor.redact("[EMAIL_1] x@example.com")
+    second, mapping = redactor.redact("x@example.com [EMAIL_3] y@example.com", mapping)
+    assert first == "[EMAIL_1] [EMAIL_2]"
+    assert second == "[EMAIL_2] [EMAIL_3] [EMAIL_4]"
+    assert mapping.counts() == {"EMAIL": 2}
+    assert redactor.reidentify(second, mapping) == "x@example.com [EMAIL_3] y@example.com"
+
+
+def test_later_source_literal_conflicting_with_issued_token_fails_closed() -> None:
+    redactor = RegexRedactor()
+    _, mapping = redactor.redact("x@example.com")
+    with pytest.raises(ValueError, match="source placeholder conflicts"):
+        redactor.redact("Literal [EMAIL_1] y@example.com", mapping)
+    assert mapping.counts() == {"EMAIL": 1}
