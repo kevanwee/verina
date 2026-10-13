@@ -66,7 +66,7 @@ Small four-pixel corners support precise document surfaces. Status stamp shapes 
 
 `LedgerPreview` selects preset synthetic examples using native buttons and explicit pressed states. The assertion, status and source update together. `StatusStamp` adds a spoken category prefix and distinct Phosphor bold icons. The export control remains focusable so its reason can be read. Buttons and demo navigation have touch targets of at least 44px in height.
 
-`SmoothScroll` owns the only Lenis instance, driven by the GSAP ticker with ScrollTrigger synchronization. Landing arrival uses the existing `Reveal` client leaf and media-query gate. Workbench content has no page entrance choreography. Content stays visible without JavaScript or under reduced motion; changing the motion preference destroys smoothing.
+`SmoothScroll` owns the only Lenis instance, driven by the GSAP ticker with ScrollTrigger synchronization. Landing supporting actions and the prototype note use the existing `Reveal` client leaf and media-query gate. The headline, explanatory paragraph, proof and stamps stay immediately visible. Workbench content has no page entrance choreography. Content stays visible without JavaScript or under reduced motion; changing the motion preference destroys smoothing.
 
 ## Do's and Don'ts
 

@@ -11,10 +11,10 @@ import {
 } from "@/lib/motion";
 
 /**
- * Load reveal for the workspace shell.
+ * A restrained arrival for the landing page's supporting actions and note.
  *
- * What it communicates: the page arrives in reading order, then each ledger
- * status is applied last, like a stamp landing on a filed document.
+ * Headline, explanatory text and ledger proof stay immediately visible. They
+ * must never wait for hydration or an opacity tween to become an LCP candidate.
  *
  * - Content is fully visible in the server HTML; GSAP only animates *from* a
  *   hidden state, so no-JS and reduced-motion users see a static page.
@@ -43,16 +43,7 @@ export function Reveal({
           y: 8,
           duration: duration.slow,
           stagger,
-        }).from(
-          "[data-reveal-stamp]",
-          {
-            autoAlpha: 0,
-            scale: 1.08,
-            duration: duration.base,
-            stagger,
-          },
-          "-=0.1",
-        );
+        });
       });
       return () => mm.revert();
     },

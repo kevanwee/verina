@@ -171,9 +171,10 @@ Rules:
    CSS transitions also collapse to 0.01ms globally.
 5. Use `useGSAP` (from `@gsap/react`) for all GSAP work in React so it is reverted on unmount.
 
-The one authored moment in v0: the workspace arrives in reading order (8px rise, 300ms, 40ms
-stagger), then each ledger stamp lands last (scale 1.08 to 1, 200ms), like a stamp applied to a
-filed document (`app/components/Reveal.tsx`).
+The current authored moment is the landing page's supporting actions and prototype note
+arriving in reading order (8px rise, 300ms, 40ms stagger). The headline, explanatory text,
+ledger proof and stamps remain immediately visible; they do not wait for opacity or hydration
+to become a paint candidate (`app/components/Reveal.tsx`). The workbench has no page entrance sequence.
 
 ## 7. Accessibility rules (WCAG 2.2 AA, product requirement)
 

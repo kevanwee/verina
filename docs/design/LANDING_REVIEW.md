@@ -36,9 +36,12 @@ Method: independent coordinating-agent visual review plus designer detector/brow
 | Keyboard | First Tab reaches skip link; Enter focuses main; Space selects example; locked export remains focusable |
 | Navigation and demo states | Contradicted/missing evidence selection, workbench round-trip and export explanation passed |
 | Production visual capture | Desktop and mobile captures generated without development indicator |
+| Lighthouse 13.5 local production run | Initial: performance 94/100, accessibility 100/100; LCP 3.12s, CLS 0, total blocking time 21.5ms. After bounded hero-motion change: performance 94, accessibility 100, LCP 3.11s, CLS 0, total blocking time 15ms |
 
 Accessibility 3/4, performance 3/4, theming 4/4, responsive design 3/4, implementation integrity 4/4: provisional technical score 17/20. Evidence files and scripts remain private local test artifacts; the role handoff records their exact paths. Scores describe this bounded review, not a certification.
 
 ## Limits and remaining acceptance
 
-Only headless Microsoft Edge was exercised. No physical touch device, screen reader, cross-browser matrix or network-failure journey was tested. This landing page has no form, backend submission or upload journey. The demo uses preset statuses, so verification correctness and a real export gate require separate backend acceptance. Automated contrast/axe results and screenshots do not prove full WCAG conformance. The product owner has not yet accepted the design.
+Only headless Microsoft Edge was exercised. No physical touch device, screen reader, cross-browser matrix or network-failure journey was tested. Lighthouse is a throttled local lab run, not field-user evidence; its final LCP of 3.11s exceeds the taste-skill 2.5s target and needs a performance follow-up before production acceptance. INP was not measured. This landing page has no form, backend submission or upload journey. The demo uses preset statuses, so verification correctness and a real export gate require separate backend acceptance. Automated contrast/axe results and screenshots do not prove full WCAG conformance. The product owner has not yet accepted the design.
+
+The LCP element was the hero h1. A bounded follow-up removed opacity/timing gates from the headline, explanatory paragraph and ledger proof, including the stamp sequence; only supporting actions and the prototype note retain entrance motion. Focused tests, lint and build passed again, and production desktop/mobile captures were refreshed without layout changes. One Lighthouse rerun found no meaningful LCP improvement. Four preloaded fonts total approximately 150KB; further critical-resource work is deferred for a measured performance task.

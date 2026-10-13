@@ -27,15 +27,15 @@ export default function Home() {
       <main id="main" tabIndex={-1} className={styles.main}>
         <Reveal className={styles.hero}>
           <section className={styles.heroCopy} aria-labelledby="hero-heading">
-            <h1 id="hero-heading" className={styles.headline} data-reveal="">Every assertion.<br /> <em>Accounted for.</em></h1>
-            <p className={styles.lede} data-reveal="">AI-assisted contract review, with the source beside the claim and the lawyer at the centre of every decision.</p>
+            <h1 id="hero-heading" className={styles.headline}>Every assertion.<br /> <em>Accounted for.</em></h1>
+            <p className={styles.lede}>AI-assisted contract review, with the source beside the claim and the lawyer at the centre of every decision.</p>
             <div className={styles.heroActions} data-reveal="">
               <Link className={styles.primaryLink} href="/workbench">Explore the workbench <ArrowRight weight="bold" aria-hidden="true" /></Link>
               <a className={styles.textLink} href="#approach">See how it works <ArrowDown weight="bold" aria-hidden="true" /></a>
             </div>
             <p className={styles.demoNote} data-reveal="">A working prototype for Singapore legal teams.<br />The demo uses synthetic examples only.</p>
           </section>
-          <div className={styles.heroProof} data-reveal=""><LedgerPreview /></div>
+          <div className={styles.heroProof}><LedgerPreview /></div>
         </Reveal>
         <div className={styles.audience}>
           <p>Built around the judgement of</p>
