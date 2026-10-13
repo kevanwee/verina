@@ -42,6 +42,9 @@ export default function Workbench() {
               <li>
                 <a href="#statuses">Statuses</a>
               </li>
+              <li>
+                <Link href="/workbench/intake">Intake prototype</Link>
+              </li>
             </ul>
           </nav>
         </div>
