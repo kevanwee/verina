@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verina architecture map</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #252c2c; background: #f6f5f1; }
+    body { max-width: 1440px; margin: auto; padding: 32px; }
+    h1 { font-size: 2rem; margin-bottom: 8px; }
+    p { max-width: 80ch; line-height: 1.6; }
+    a { color: #205d56; }
+    nav { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0; }
+    section { background: white; border: 1px solid #d8dcd8; padding: 24px; margin: 24px 0; border-radius: 6px; }
+    h2 { margin-top: 0; }
+    img { display: block; width: 100%; height: auto; }
+    .scroll { overflow: auto; }
+    .code img { min-width: 1050px; }
+    a:focus-visible { outline: 3px solid #bc7734; outline-offset: 4px; }
+    @media (max-width: 600px) { body { padding: 16px; } section { padding: 16px; } }
+    @media print { nav { display: none; } section { break-inside: avoid; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Verina architecture map</h1>
+    <p>Code inspection: 13 October 2026. Solid connections are implemented; dashed connections are proposed. Live model transport is disabled. These views describe a local synthetic skeleton, not a deployed legal workbench.</p>
+    <p><a href="README.md">Read the architecture notes and evidence</a>. All diagrams are local SVGs; this viewer requires no network access.</p>
+    <nav aria-label="Architecture views">
+      <a href="#context">Context</a><a href="#containers">Containers</a><a href="#components">API components</a><a href="#classes">Classes</a><a href="#sequence">Call sequence</a>
+    </nav>
+  </header>
+  <main>
+    <section id="context"><h2>C1 · System context</h2><p>Intended people and external systems. Dashed external connections are unimplemented.</p><a href="c1-context.svg">Open full SVG</a> · <a href="c1-context.mmd">Edit source</a><img src="c1-context.svg" alt="Lawyer views Verina's synthetic demo; firm administration, identity provider, model provider and authority sources are proposed connections."></section>
+    <section id="containers"><h2>C2 · Containers</h2><p>The web app and API run separately. Neither database nor document storage is provisioned.</p><a href="c2-containers.svg">Open full SVG</a> · <a href="c2-containers.mmd">Edit source</a><img src="c2-containers.svg" alt="Local developer accesses Next.js on port 3000 and FastAPI health on port 8000; web-to-API, relational storage and original document storage links are planned."></section>
+    <section id="components"><h2>C3 · API components</h2><p>The AI module is invoked directly by tests. It is not mounted as an HTTP endpoint.</p><a href="c3-api-components.svg">Open full SVG</a> · <a href="c3-api-components.mmd">Edit source</a><img src="c3-api-components.svg" alt="FastAPI factory reads settings and installs headers; tests invoke orchestrator with registries, redactor, fake or mock-only client and in-memory audit sink; matters, documents and ledger are placeholders."></section>
+    <section id="classes" class="code"><h2>C4 · Interface-based polymorphism</h2><p>Injected Python protocols permit behavior substitution without role inheritance trees. Scroll or open the SVG for the full class view.</p><a href="c4-orchestrator-classes.svg">Open full SVG</a> · <a href="c4-orchestrator-classes.mmd">Edit source</a><div class="scroll"><img src="c4-orchestrator-classes.svg" alt="Orchestrator depends on ModelClient, Redactor, RedactionPolicy and AuditSink protocols, satisfied structurally by current implementations, plus model and template registries."></div></section>
+    <section id="sequence"><h2>AI call · Sequencing and failure branches</h2><p>Audit emission precedes output return. Completion-only, in-memory events cannot prove crash recovery or per-attempt persistence.</p><a href="ai-call-sequence.svg">Open full SVG</a> · <a href="ai-call-sequence.mmd">Edit source</a><img src="ai-call-sequence.svg" alt="Validate, redact, render, call fake or mock model, emit completion metadata, then re-identify and return; validation errors make no model call, model exceptions are audited, sink failure prevents result return."></section>
+  </main>
+</body>
+</html>
