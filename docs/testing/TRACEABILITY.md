@@ -26,10 +26,10 @@ Status values: **Planned** (no test yet) · **Partial** (some criteria covered) 
 
 | Id | Short title | Sprint | Planned tests / suites | Gate | Status |
 | --- | --- | --- | --- | --- | --- |
-| US-1 | Intake by forwarded email | S2 (web form S1) | `int-US-1-01..03`; `e2e-US-1-01` (web form) | — | Planned |
+| US-1 | Intake by forwarded email | S2 (web form S1) | `__tests__/intake.test.tsx`: required fields, inline errors/focus, synthetic-only/no-upload warning, reset; planned `int-US-1-01..03`, `e2e-US-1-01` | — | Partial (in-memory synthetic web walkthrough; email, authenticated submission and durable intake remain) |
 | US-2 | Auto-tier Green / Yellow / Red | S3 | `api-US-2-*` with fake model; `eval-gold` tier subset | 2 | Planned |
-| US-3 | Conflict check before work | S1 | `int-US-3-01..02`; `e2e-US-3-01` | — | Planned |
-| US-4 | Requester status view | S8 | `int-US-4-01` (no privileged fields); `e2e-US-4-01` + axe | — | Planned |
+| US-3 | Conflict check before work | S1 | `__tests__/intake.test.tsx`: pending review block, named clear, conflict/waiver/decline, nonblank and Unicode-length waiver validation, keyboard flow; planned `int-US-3-01..02`, `e2e-US-3-01` | — | Partial (simulated result and identity; authenticated recording, retained evidence and service integration remain) |
+| US-4 | Requester status view | S8 | `__tests__/intake.test.tsx`: no privileged panel/reason in requester DOM or announcements, coarse conflict/waiver/declined status; planned `int-US-4-01`, `e2e-US-4-01` + axe | — | Partial (synthetic view switch only; server-authorized requester projection and end-to-end integration remain) |
 | US-5 | Scanned PDF → clause structure | S2 | `api-US-5-*`; `golden` PDF fixtures | 1 | Planned |
 | US-6 | Keep counterparty tracked changes | S2 | `golden-US-6-01` (counterparty revisions intact + attributed) | 1 | Planned |
 | US-7 | Redact personal data before AI calls | S2 | `api-US-7-*`; `eval-pii-US-7` (recall per category, re-identification) | 1 | Planned |
