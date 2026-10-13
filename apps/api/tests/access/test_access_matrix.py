@@ -7,6 +7,7 @@ policy's outcome and reason code.
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,9 @@ from verina.access import (
     GRANTS,
     Action,
     ActorId,
+    ConflictCheckRecord,
     ConflictStatus,
+    ConflictWaiver,
     InMemoryIdentityAdapter,
     LedgerEntryStatus,
     MatterAccess,
@@ -103,14 +106,53 @@ class _Ledger:
         return counts
 
 
+def _recorded_access(
+    tenant: TenantId,
+    *,
+    members: frozenset[ActorId] = frozenset(),
+    walled: frozenset[ActorId] = frozenset(),
+    conflict_status: ConflictStatus = ConflictStatus.CLEAR,
+) -> MatterAccess:
+    """Explicit invented check/profile/waiver for matrix scenarios, never runtime backfill."""
+    status = conflict_status
+    identity = InMemoryIdentityAdapter()
+    identity.register(
+        "fixture-token",
+        tenant.value,
+        "fixture-recorder",
+        (Role.LAWYER,),
+        display_name="Synthetic matrix lawyer",
+    )
+    actor = ActorId("fixture-recorder")
+    profile = identity.profile(tenant, actor)
+    assert profile is not None
+    now = datetime(2026, 10, 13, tzinfo=UTC)
+    check = None
+    waiver = None
+    if status in {ConflictStatus.CLEAR, ConflictStatus.CONFLICT, ConflictStatus.WAIVED}:
+        result = ConflictStatus.CONFLICT if status is ConflictStatus.WAIVED else status
+        check = ConflictCheckRecord(MATTER, result, actor, now, 1, profile)
+        if status is ConflictStatus.WAIVED:
+            waiver = ConflictWaiver(MATTER, 1, profile, actor, "Synthetic matrix waiver", now, True)
+    return MatterAccess(
+        tenant,
+        MATTER,
+        conflict_recorded_by=actor if check else None,
+        conflict_check=check,
+        waiver=waiver,
+        members=members,
+        walled=walled,
+        conflict_status=conflict_status,
+    )
+
+
 def _matter(row: Row) -> MatterAccess | None:
     if row.relation in {"missing", "none"}:
         return None
     members = {ACTOR} if row.relation in {"member", "walled-member"} else set()
     walled = {ACTOR} if row.relation in {"walled-member", "walled"} else set()
-    return MatterAccess(
+    return _recorded_access(
         OTHER_TENANT if row.relation == "other-tenant" else TENANT,
-        MATTER,
         members=frozenset(members | {ActorId("someone-else")}),
         walled=frozenset(walled),
         conflict_status=ConflictStatus(row.options.get("conflict", "clear")),
@@ -185,8 +227,8 @@ def test_decide_rejects_non_principal() -> None:
 def test_overlong_reason_rejected() -> None:
     identity = InMemoryIdentityAdapter()
     principal = identity.register("t", TENANT.value, ACTOR.value, [Role.LAWYER])
-    access = MatterAccess(
-        TENANT, MATTER, members=frozenset({ACTOR}), conflict_status=ConflictStatus.CONFLICT
+    access = _recorded_access(
+        TENANT, members=frozenset({ACTOR}), conflict_status=ConflictStatus.CONFLICT
     )
     decision = MatterAccessPolicy(_Ledger("clean")).decide(
         principal, Action.WAIVE_CONFLICT, access, reason="x" * 2001
@@ -203,8 +245,8 @@ def test_negative_ledger_count_blocks_export() -> None:
 
     identity = InMemoryIdentityAdapter()
     principal = identity.register("t", TENANT.value, ACTOR.value, [Role.LAWYER])
-    access = MatterAccess(
-        TENANT, MATTER, members=frozenset({ACTOR}), conflict_status=ConflictStatus.CLEAR
+    access = _recorded_access(
+        TENANT, members=frozenset({ACTOR}), conflict_status=ConflictStatus.CLEAR
     )
     decision = MatterAccessPolicy(Weird()).decide(principal, Action.EXPORT_TO_CLIENT, access)
     assert decision.reason_code is ReasonCode.LEDGER_STATUS_UNAVAILABLE
