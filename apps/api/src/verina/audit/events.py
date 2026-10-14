@@ -244,7 +244,87 @@ class MatterMutationCompleted(BaseModel):
         return self
 
 
+_HEX64 = r"^[0-9a-f]{64}$"
+_SUBJECT_HMAC = r"^hmac-sha256:[0-9a-f]{64}$"
+
+
+class DirectoryChanged(BaseModel):
+    """Committed directory, organization or platform-admin write (ADR 008, SEC M4, US-54).
+
+    Written in the same transaction as the change, to the organization's chain (or the system
+    chain for platform-level writes). Metadata only: opaque ids, roles, flags, revisions and a
+    request hash. Never e-mail addresses, display names or organization names; a target
+    ``(issuer, subject)`` appears only as a keyed HMAC.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    schema_version: Literal[1] = 1
+    event_type: Literal["directory.changed"] = "directory.changed"
+    event_id: UUID = Field(default_factory=uuid4)
+    occurred_at: datetime
+    tenant_id: str = Field(min_length=1, description="Chain id: organization or system chain.")
+    actor: str = Field(min_length=1, description="Acting principal / platform admin / cli id.")
+    actor_kind: Literal["platform_admin", "tenant_admin", "member", "cli"]
+    matter_id: None = None
+    action: Literal[
+        "organization_created",
+        "organization_updated",
+        "member_invited",
+        "member_updated",
+        "invite_resent",
+        "invite_accepted",
+        "principal_upserted",
+        "principal_activation_changed",
+        "binding_created",
+        "binding_removed",
+        "platform_admin_bootstrapped",
+    ]
+    organization_id: str | None = None
+    target_actor_id: str | None = None
+    operation_id: UUID | None = None
+    request_hash: str | None = Field(default=None, pattern=_HEX64)
+    roles: tuple[str, ...] | None = Field(default=None, description="Roles after the change.")
+    active: bool | None = Field(default=None, description="Principal active flag after.")
+    organization_active: bool | None = None
+    revision: StrictInt | None = Field(default=None, ge=1)
+    subject_hmac: str | None = Field(default=None, pattern=_SUBJECT_HMAC)
+
+
+class AuthenticationFailed(BaseModel):
+    """A rejected bearer credential (SEC M4). Reason class and a keyed subject HMAC only.
+
+    ``subject_hmac`` is present only when the token itself verified (so the subject is
+    issuer-asserted, not attacker-chosen) and a key is configured. Writes are rate-limited;
+    ``suppressed_since_last`` counts failures that were not individually recorded.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    schema_version: Literal[1] = 1
+    event_type: Literal["auth.failure"] = "auth.failure"
+    event_id: UUID = Field(default_factory=uuid4)
+    occurred_at: datetime
+    tenant_id: str = Field(min_length=1)
+    actor: Literal["unauthenticated"] = "unauthenticated"
+    matter_id: None = None
+    reason_class: Literal[
+        "missing_credential",
+        "malformed_credential",
+        "token_rejected",
+        "unbound",
+        "principal_inactive",
+        "organization_inactive",
+        "directory_record_invalid",
+        "insufficient_assurance",
+        "unauthenticated",
+    ]
+    surface: Literal["me", "admin", "members", "matters"]
+    subject_hmac: str | None = Field(default=None, pattern=_SUBJECT_HMAC)
+    suppressed_since_last: StrictInt = Field(default=0, ge=0)
+
+
 AuditPayload = AIAuditPayload | AccessAuditEvent | MatterMutationCompleted
+"""Payloads emitted through an async :class:`~verina.ai.audit.AuditSink`. Directory and
+authentication events are appended directly on the writing transaction instead."""
 
 
 _PAYLOAD_TYPES: dict[str, type[BaseModel]] = {}
@@ -279,6 +359,8 @@ register_payload_type(AIModelCallStarted)
 register_payload_type(AIAuditEvent)
 register_payload_type(AccessAuditEvent)
 register_payload_type(MatterMutationCompleted)
+register_payload_type(DirectoryChanged)
+register_payload_type(AuthenticationFailed)
 
 
 def payload_type(event_type: str) -> type[BaseModel]:
