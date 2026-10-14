@@ -18,6 +18,7 @@ const { ConnectedFrame } = await import("../../app/(connected)/_components/Conne
 
 const CONFIG = readConnectedConfig({
   VERINA_CONNECTED: "1",
+  VERINA_PUBLIC_ORIGIN: "http://localhost:3000",
   NEXT_PUBLIC_SUPABASE_URL: "https://example-project.supabase.co",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_synthetic_key_for_tests_only",
   VERINA_API_BASE_URL: "http://127.0.0.1:8000",

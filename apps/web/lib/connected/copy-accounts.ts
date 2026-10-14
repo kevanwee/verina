@@ -137,7 +137,7 @@ export const MEMBERS = {
   EMAIL_TAKEN:
     "This email already has a Verina account. Each person can belong to one organization.",
   NAME_LABEL: "Display name",
-  NAME_HINT: "Shown to colleagues and in audit records. Up to 120 characters.",
+  NAME_HINT: "Shown to colleagues and used to identify their work. Up to 120 characters.",
   NAME_BLANK: "Enter their display name.",
   NAME_LONG: "Keep the display name to 120 characters or fewer.",
   NAME_HIDDEN: "Remove line breaks and hidden characters from the display name.",
@@ -146,7 +146,7 @@ export const MEMBERS = {
   ROLES_BLANK: "Choose at least one role.",
   ADD: "Add member",
   ADDING: "Adding",
-  added: (name: string) => `Member added: ${name}. Invitation sent.`,
+  added: (name: string) => `Member added: ${name}. Invitation requested.`,
   EDIT_ROLES: "Change roles",
   rolesFor: (name: string) => `Roles for ${name}`,
   SAVE_ROLES: "Save roles",
@@ -156,7 +156,7 @@ export const MEMBERS = {
   DEACTIVATE: "Deactivate",
   REACTIVATE: "Reactivate",
   deactivateConfirm: (name: string) =>
-    `Deactivate ${name}? They can no longer sign in or open matters. Their past work stays attributed to them. You can reactivate them later.`,
+    `Deactivate ${name}? They can no longer access this organization or its matters. Their past work stays attributed to them. You can reactivate them later.`,
   reactivateConfirm: (name: string) =>
     `Reactivate ${name}? They can sign in again with the roles shown.`,
   CONFIRM_DEACTIVATE: "Deactivate member",
@@ -164,7 +164,7 @@ export const MEMBERS = {
   deactivated: (name: string) => `${name} is deactivated.`,
   reactivated: (name: string) => `${name} is active again.`,
   RESEND: "Resend invitation",
-  resent: (name: string) => `Invitation sent again to ${name}.`,
+  resent: (name: string) => `Invitation requested again for ${name}.`,
   LAST_ADMIN:
     "This is the last active organization administrator. Give another active member the Organization administrator role first.",
   LOADING: "Loading members.",
@@ -175,15 +175,15 @@ export const MEMBERS = {
 export const REQUEST = {
   UNCONFIRMED_HEADING: "Not confirmed yet",
   UNCONFIRMED_BODY:
-    "Verina could not confirm this change was saved. Your connection may have dropped. Retry sends the same request, so it cannot be recorded twice.",
+    "Verina could not confirm this change was saved. Your connection may have dropped. Retry sends the same request, so a saved directory change is not duplicated. An invitation email may be requested again.",
   RETRY: "Retry",
   UNAVAILABLE_HEADING: "Verina could not save this just now",
   UNAVAILABLE_BODY:
-    "Try again in a few minutes. Retrying sends the same request, so it cannot be recorded twice.",
+    "Try again in a few minutes. Retrying sends the same request, so a saved directory change is not duplicated. An invitation email may be requested again.",
   TRY_AGAIN: "Try again",
   SESSION_HEADING: "Your session has ended",
   SESSION_BODY:
-    "Sign in again to finish saving. Your last change has not been confirmed. After you sign in, Verina sends the same request again, so it cannot be recorded twice.",
+    "Sign in again to finish saving. Your last change has not been confirmed. After you sign in, Verina sends the same request again, so a saved directory change is not duplicated. An invitation email may be requested again.",
   SESSION_READ_BODY: "Sign in again to keep working.",
   SIGN_IN_AGAIN: "Sign in again",
   NOT_AVAILABLE_HEADING: "This is not available",
@@ -194,7 +194,7 @@ export const REQUEST = {
   INVALID_BODY: "Nothing was saved. Check each field against its hint, then try again.",
   DEFECT_HEADING: "This request could not be completed",
   defectBody: (code: string) =>
-    `Nothing new was recorded. Reload the page and try again. If it happens again, tell your Verina administrator and quote code ${code}.`,
+    `Verina could not confirm the result. Reload the page and try again. If it happens again, tell your Verina administrator and quote code ${code}.`,
   LOAD_FAILED_HEADING: "Verina cannot load this right now",
   LOAD_FAILED_BODY: "This is a problem on our side. Try again in a few minutes.",
   SAVING: "Saving.",

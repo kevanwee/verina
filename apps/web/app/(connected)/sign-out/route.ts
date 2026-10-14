@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { connectedConfig } from "@/lib/connected/config";
-import { authForResponse, clearAuthCookies, isSameOrigin } from "@/lib/connected/auth/server";
+import { authForResponse, clearAuthCookies } from "@/lib/connected/auth/server";
 import { PATHS } from "@/lib/connected/routes";
 
 /**
@@ -10,11 +10,12 @@ import { PATHS } from "@/lib/connected/routes";
 export async function POST(request: NextRequest) {
   const config = connectedConfig();
   if (config === null) return new NextResponse(null, { status: 404 });
-  if (!isSameOrigin(request)) {
+  if (request.headers.get("origin") !== config.publicOrigin ||
+      (request.headers.get("sec-fetch-site") !== null && request.headers.get("sec-fetch-site") !== "same-origin")) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const target = new URL(PATHS.signIn, request.url);
+  const target = new URL(PATHS.signIn, config.publicOrigin);
   target.searchParams.set("signedOut", "1");
   const response = NextResponse.redirect(target, 303);
   await authForResponse(config, request, () => response).signOut();

@@ -9,6 +9,7 @@ import { config as proxyConfig } from "../../proxy";
 
 const CONNECTED_ENV = {
   VERINA_CONNECTED: "1",
+  VERINA_PUBLIC_ORIGIN: "http://localhost:3000",
   NEXT_PUBLIC_SUPABASE_URL: "https://example-project.supabase.co",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_synthetic_key_for_tests_only",
   VERINA_API_BASE_URL: "http://127.0.0.1:8000",
@@ -56,6 +57,7 @@ describe("connected configuration", () => {
       "NEXT_PUBLIC_SUPABASE_URL",
       "NEXT_PUBLIC_SUPABASE_ANON_KEY",
       "VERINA_API_BASE_URL",
+      "VERINA_PUBLIC_ORIGIN",
     ] as const) {
       expect(readConnectedConfig({ ...CONNECTED_ENV, [key]: undefined })).toBeNull();
       expect(readConnectedConfig({ ...CONNECTED_ENV, [key]: "" })).toBeNull();
@@ -206,6 +208,16 @@ describe("mode gate (proxy.ts)", () => {
     const refresh = refreshWith(false);
     const signIn = await runGate(request("/sign-in"), () => CONFIG, refresh);
     expect(signIn.headers.get("x-middleware-next")).toBe("1");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown and cross-site API requests before session refresh", async () => {
+    const refresh = refreshWith(true);
+    expect((await runGate(request("/api/v1/unlisted"), () => CONFIG, refresh)).status).toBe(404);
+    const crossSite = new NextRequest("http://localhost:3000/api/v1/me", {
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    expect((await runGate(crossSite, () => CONFIG, refresh)).status).toBe(403);
     expect(refresh).not.toHaveBeenCalled();
   });
 });

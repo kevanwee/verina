@@ -27,7 +27,11 @@ export type ProxyDeps = {
 const NO_STORE = "private, no-store, max-age=0";
 
 function error(status: number, code: string, extra: Record<string, string> = {}) {
-  return Response.json({ error: code }, { status, headers: { "Cache-Control": NO_STORE, ...extra } });
+  return Response.json({ error: code }, { status, headers: {
+    "Cache-Control": NO_STORE,
+    "Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff", ...extra,
+  } });
 }
 
 /** Reads at most BODY_LIMIT_BYTES; null when the body is larger. */
@@ -113,8 +117,11 @@ export async function handleApiProxy(
   if (result.kind === "unreachable") return error(502, "upstream_unavailable");
 
   const noBody = result.status === 204 || result.status === 205 || result.status === 304;
+  const headers = filterResponseHeaders(result.headers);
+  headers.set("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'");
+  headers.set("X-Content-Type-Options", "nosniff");
   return new Response(noBody ? null : (result.body as BodyInit), {
     status: result.status,
-    headers: filterResponseHeaders(result.headers),
+    headers,
   });
 }

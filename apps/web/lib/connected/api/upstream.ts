@@ -1,6 +1,6 @@
 import "server-only";
 import type { ConnectedConfig } from "../config";
-import { RESPONSE_LIMIT_BYTES, UPSTREAM_TIMEOUT_MS } from "./policy";
+import { isJsonContentType, RESPONSE_LIMIT_BYTES, UPSTREAM_TIMEOUT_MS } from "./policy";
 
 /*
  * Server-to-server calls to the Verina API. The bearer token is attached here and only
@@ -72,6 +72,12 @@ export async function callUpstream(
   }
   // The API never redirects; following one could send the bearer token elsewhere.
   if (response.status >= 300 && response.status < 400) return { kind: "unreachable" };
+  // Never relay an upstream HTML error page under the application's trusted origin.
+  if (![204, 205, 304].includes(response.status) &&
+      !isJsonContentType(response.headers.get("content-type"))) {
+    await response.body?.cancel();
+    return { kind: "unreachable" };
+  }
   try {
     const body = await readCapped(response, RESPONSE_LIMIT_BYTES);
     if (body === null) return { kind: "unreachable" };

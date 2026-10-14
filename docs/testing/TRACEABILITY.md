@@ -59,6 +59,19 @@ Status values: **Planned** (no test yet) · **Partial** (some criteria covered) 
 
 ## Cross-cutting (NFR) suites
 
+### Connected account and intake source slice
+
+These are synthetic automated source tests. Live provider/browser/database acceptance,
+no-JavaScript execution and manual accessibility remain separate evidence.
+
+| Story / boundary | Executable evidence | Status |
+| --- | --- | --- |
+| US-50 sign-in | `connected/sign-in.test.tsx`, `auth-routes.test.ts`, `front-door-qa.test.ts` | Source tests; actual email/login pending |
+| US-52 account | `connected/account.test.tsx` | Source tests; current directory response contract |
+| US-53 administration | `connected/admin.test.tsx`, `api-proxy.test.ts` | Source tests; live invitation and authorization pending |
+| US-54 front-door security | `connected/mode-gate.test.ts`, `auth-routes.test.ts`, `front-door-qa.test.ts`, `api-proxy.test.ts`, `return-to.test.ts`, `preview-isolation.test.tsx` | Source tests; hosted configuration/CSP/shared limiter pending |
+| T1.2 connected intake | `connected/intake-connected.test.tsx` | Source tests; actual authenticated save/reload/restart pending |
+
 | NFR | Suite | Gate |
 | --- | --- | --- |
 | NFR-4 access | `int-EN-7-*` authz matrix | 1 |

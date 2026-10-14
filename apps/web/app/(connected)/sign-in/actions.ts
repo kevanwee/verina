@@ -12,16 +12,16 @@ import {
 
 export async function signInAction(previous: SignInState, formData: FormData): Promise<SignInState> {
   const config = connectedConfig();
-  if (config === null) {
+  if (config === null || (await headers()).get("origin") !== config.publicOrigin) {
     return { ...previous, error: "unavailable", revision: previous.revision + 1 };
   }
   const outcome = await runSignIn(previous, formData, {
     provider: () => authFromCookies(config),
-    origin: (await headers()).get("origin"),
+    origin: config.publicOrigin,
     rememberReturnTo: async (path) => {
       const store = await cookies();
       if (path === null) {
-        store.delete({ name: RETURN_TO_COOKIE, path: "/auth" });
+        store.delete({ name: RETURN_TO_COOKIE, path: "/" });
         return;
       }
       // Kept server-side so the emailed link matches the allow-listed callback URL exactly.
@@ -29,14 +29,14 @@ export async function signInAction(previous: SignInState, formData: FormData): P
         httpOnly: true,
         sameSite: "lax",
         secure: config.secureCookies,
-        path: "/auth",
+        path: "/",
         maxAge: 60 * 60,
       });
     },
   });
   if ("redirectTo" in outcome) {
-    (await cookies()).delete({ name: RETURN_TO_COOKIE, path: "/auth" });
-    redirect(outcome.redirectTo);
+    (await cookies()).delete({ name: RETURN_TO_COOKIE, path: "/" });
+    redirect(new URL(outcome.redirectTo, config.publicOrigin).href);
   }
   return outcome.state;
 }

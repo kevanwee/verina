@@ -13,6 +13,8 @@
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type ConnectedConfig = {
+  /** Fixed application origin; never derived from request forwarding headers. */
+  readonly publicOrigin: string;
   /** Supabase project URL (public). No trailing slash. */
   readonly supabaseUrl: string;
   /** Supabase anon or publishable key (public by design, still only used server-side). */
@@ -24,6 +26,7 @@ export type ConnectedConfig = {
 };
 
 export const ENV_KEYS = {
+  publicOrigin: "VERINA_PUBLIC_ORIGIN",
   connected: "VERINA_CONNECTED",
   supabaseUrl: "NEXT_PUBLIC_SUPABASE_URL",
   supabaseAnonKey: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -67,11 +70,14 @@ export function readConnectedConfig(env: Env): ConnectedConfig | null {
   const supabaseUrl = parseServiceUrl(env[ENV_KEYS.supabaseUrl]);
   const supabaseAnonKey = parseKey(env[ENV_KEYS.supabaseAnonKey]);
   const apiBaseUrl = parseServiceUrl(env[ENV_KEYS.apiBaseUrl]);
-  if (!supabaseUrl || !supabaseAnonKey || !apiBaseUrl) {
-    warnIncomplete({ supabaseUrl, supabaseAnonKey, apiBaseUrl });
+  const parsedOrigin = parseServiceUrl(env[ENV_KEYS.publicOrigin]);
+  const publicOrigin = parsedOrigin && new URL(parsedOrigin).pathname === "/" ? parsedOrigin : null;
+  if (!supabaseUrl || !supabaseAnonKey || !apiBaseUrl || !publicOrigin) {
+    warnIncomplete({ supabaseUrl, supabaseAnonKey, apiBaseUrl, publicOrigin });
     return null;
   }
   return {
+    publicOrigin,
     supabaseUrl,
     supabaseAnonKey,
     apiBaseUrl,
@@ -86,6 +92,7 @@ function warnIncomplete(parts: Record<string, string | null>) {
   if (warned) return;
   warned = true;
   const names: Record<string, string> = {
+    publicOrigin: ENV_KEYS.publicOrigin,
     supabaseUrl: ENV_KEYS.supabaseUrl,
     supabaseAnonKey: ENV_KEYS.supabaseAnonKey,
     apiBaseUrl: ENV_KEYS.apiBaseUrl,

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { ConnectedConfig } from "./config";
 import { classifyConnectedPath, intakeRewriteTarget, PATHS } from "./routes";
 import { safeReturnTo } from "./return-to";
+import { allowedUpstreamPath } from "./api/policy";
 
 /**
  * Result of refreshing the provider session for one request. The proxy copies refreshed
@@ -55,6 +56,20 @@ export async function runGate(
     return notFound();
   }
 
+  // Reject unknown/cross-site API requests before session refresh can contact the IdP.
+  if (kind === "api") {
+    const segments = pathname.slice("/api/v1/".length).split("/");
+    if (allowedUpstreamPath(request.method, segments) === null) return apiNotFound();
+    const site = request.headers.get("sec-fetch-site");
+    const mutating = request.method !== "GET";
+    if ((site !== null && site !== "same-origin") ||
+        (site === null && mutating && request.headers.get("origin") !== config.publicOrigin)) {
+      return NextResponse.json({ error: "forbidden" }, {
+        status: 403, headers: { "Cache-Control": NO_STORE },
+      });
+    }
+  }
+
   if (kind === "intake") {
     const target = intakeRewriteTarget(pathname);
     if (target === null) return notFound();
@@ -78,7 +93,7 @@ export async function runGate(
   response.headers.set("Cache-Control", NO_STORE);
   if (kind === "api" || signedIn) return response;
 
-  const target = new URL(PATHS.signIn, request.url);
+  const target = new URL(PATHS.signIn, config.publicOrigin);
   const returnTo = safeReturnTo(pathname);
   if (returnTo) target.searchParams.set("returnTo", returnTo);
   const redirect = NextResponse.redirect(target, 303);

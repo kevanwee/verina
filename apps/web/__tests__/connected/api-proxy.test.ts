@@ -5,6 +5,7 @@ import { readConnectedConfig, type ConnectedConfig } from "@/lib/connected/confi
 
 const CONFIG = readConnectedConfig({
   VERINA_CONNECTED: "1",
+  VERINA_PUBLIC_ORIGIN: "http://localhost:3000",
   NEXT_PUBLIC_SUPABASE_URL: "https://example-project.supabase.co",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_synthetic_key_for_tests_only",
   VERINA_API_BASE_URL: "http://127.0.0.1:8000",
@@ -268,6 +269,16 @@ describe("API proxy limits and refusals", () => {
     const response = await handleApiProxy(browserRequest("GET", "me"), ["me"], deps({ fetchImpl }));
     expect(response.status).toBe(502);
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("refuses upstream HTML even on a successful response", async () => {
+    const { fetchImpl } = upstream(() => new Response("<script>bad()</script>", {
+      headers: { "Content-Type": "text/html" },
+    }));
+    const response = await handleApiProxy(browserRequest("GET", "me"), ["me"], deps({ fetchImpl }));
+    expect(response.status).toBe(502);
+    expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    expect(await response.text()).not.toContain("<script>");
   });
 
   it("never logs", async () => {

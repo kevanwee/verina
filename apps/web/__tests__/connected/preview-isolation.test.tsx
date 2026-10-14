@@ -31,6 +31,7 @@ describe("public preview isolation", () => {
 
   it("renders the preview pages without any network request, even with connected env set", () => {
     vi.stubEnv("VERINA_CONNECTED", "1");
+  vi.stubEnv("VERINA_PUBLIC_ORIGIN", "http://localhost:3000");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example-project.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_synthetic_key_for_tests_only");
     vi.stubEnv("VERINA_API_BASE_URL", "http://127.0.0.1:8000");

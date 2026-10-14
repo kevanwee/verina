@@ -107,7 +107,8 @@ export function useReauthenticate(subject: string | null, retry: () => unknown) 
         return;
       }
     } catch {
-      // Unknown session state: retrying is still safe, the key is unchanged.
+      // Preserve the frozen request until the same identity can be established.
+      return;
     }
     retry();
   }, [subject, retry]);

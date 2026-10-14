@@ -124,6 +124,11 @@ describe("sign-in flow", () => {
 });
 
 describe("auth cookies", () => {
+  it("caps persistent cookies at eight hours and preserves deletion", () => {
+    expect(hardenCookieOptions({ maxAge: 400 * 86400 }, { secureCookies: true }).maxAge).toBe(28800);
+    expect(hardenCookieOptions(undefined, { secureCookies: true }).maxAge).toBe(28800);
+    expect(hardenCookieOptions({ maxAge: 0 }, { secureCookies: true }).maxAge).toBe(0);
+  });
   it("are always httpOnly, SameSite=Lax and path /", () => {
     expect(hardenCookieOptions({ maxAge: 400 }, { secureCookies: true })).toEqual({
       httpOnly: true,

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { cookies } from "next/headers";
+import { RETURN_TO_COOKIE } from "@/lib/connected/sign-in-flow";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/connected/auth/server";
 import { AUTH } from "@/lib/connected/copy-accounts";
@@ -23,13 +25,14 @@ function first(value: string | string[] | undefined) {
 async function SignInContent({ searchParams }: { searchParams: PageProps<"/sign-in">["searchParams"] }) {
   const config = await requireConnected();
   const params = await searchParams;
-  const returnTo = safeReturnTo(first(params.returnTo));
+  const returnTo = safeReturnTo(first(params.returnTo)) ??
+    safeReturnTo((await cookies()).get(RETURN_TO_COOKIE)?.value);
   const signedOut = first(params.signedOut) === "1";
   const notice: SignInNotice = first(params.error) === "link" ? "link" : signedOut ? "signed_out" : null;
 
   if (!signedOut) {
     const session = await getSession(config);
-    if (session.state === "signed_in") redirect(returnTo ?? DEFAULT_SIGNED_IN_PATH);
+    if (session.state === "signed_in") redirect(new URL(returnTo ?? DEFAULT_SIGNED_IN_PATH, config.publicOrigin).href);
   }
 
   return <SignInForm action={signInAction} returnTo={returnTo} notice={notice} />;

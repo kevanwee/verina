@@ -37,6 +37,39 @@ ADR 007 gave the API verified-token identity and a `/v1` contract, with no CORS 
 
 ## Consequences
 
+### Review corrections (14 October 2026)
+
+`VERINA_PUBLIC_ORIGIN` is required and must be an exact HTTPS origin (HTTP loopback is
+allowed locally). Email callbacks use this configured origin, never request forwarding
+headers. Sign-in actions refuse a different Origin. Auth cookie persistence is capped at
+eight hours; this does not establish an absolute provider session timeout. Per-email
+throttling uses the same sent response as an unknown address. Unknown or cross-site API
+requests are rejected before session refresh. Upstream HTML is refused with a generic 502;
+proxy responses carry a sandbox CSP. Reauthentication does not retry a frozen mutation
+until the original identity is confirmed.
+
+These corrections do not clear the hosted activation gate. Shared rate limiting, callback
+confirmation, connected-page script CSP, provider settings, privacy review and a real
+sign-in/save/reload verification remain required. Connected mode stays off in the public
+deployment.
+
 - The public preview's behaviour and build output are unchanged; the proxy runs on `/workbench/intake` but is a pass-through when connected mode is off.
 - Supabase project settings become part of the security boundary: redirect allowlist, email templates (`token_hash` links for invites), OTP length and expiry, JWT lifetime (900 s or less recommended per ADR 007) and asymmetric signing keys so the API's static JWKS can verify tokens.
 - Open: no CSP nonce yet (ADR 007 EN-7 still applies); rate limiting on `/api/v1` and on sign-in beyond Supabase's own; audit events for sign-in and directory changes (ADR 007 M4); session expiry warning ahead of time (WCAG 2.2.1) is not implemented because the provider does not expose expiry to the browser in this design.
+
+### Callback confirmation and remaining CSP gate
+
+Callback GET renders a script-free no-store confirmation form without an Auth provider
+or credential consumption. POST requires the exact configured Origin, matching random
+httpOnly SameSite=Strict confirmation cookie/form token (ten-minute lifetime), and
+bounded URL-encoded credentials. Duplicate/mixed credentials fail closed. Auth redirects
+use the configured origin. Return-to cookies use Path=/ so a server-rendered sign-in after
+non-JavaScript submission can recover the destination.
+
+M5 remains a hosted blocker. Cache Components prerenders shells: a per-request nonce
+header alone cannot protect scripts rendered without that nonce. See the official
+[Next CSP guide](https://nextjs.org/docs/app/guides/content-security-policy) and
+[upstream compatibility report](https://github.com/vercel/next.js/issues/89754).
+A separately reviewed rendering strategy and live script/nonce verification are needed.
+This change does not claim nonce CSP on React pages; callback HTML has no scripts and
+script-src 'none'. Changing global caching would affect the existing public preview.

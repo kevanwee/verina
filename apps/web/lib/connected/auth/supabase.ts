@@ -34,8 +34,13 @@ export function hardenCookieOptions(
     path: "/",
     secure: config.secureCookies,
   };
-  if (typeof options?.maxAge === "number") hardened.maxAge = options.maxAge;
-  if (options?.expires instanceof Date) hardened.expires = options.expires;
+  // Bound browser persistence; server/provider session revocation remains a separate gate.
+  const limit = 8 * 60 * 60;
+  hardened.maxAge = typeof options?.maxAge === "number" && Number.isFinite(options.maxAge)
+    ? Math.max(0, Math.min(options.maxAge, limit)) : limit;
+  if (options?.expires instanceof Date) {
+    hardened.expires = new Date(Math.min(options.expires.getTime(), Date.now() + limit * 1000));
+  }
   return hardened;
 }
 
@@ -94,7 +99,8 @@ export function createSupabaseAuth(config: ConnectedConfig, jar: CookieJar): Aut
           options: { emailRedirectTo: callbackUrl, shouldCreateUser: false },
         });
         if (!error) return "sent";
-        if (isRateLimited(error)) return "rate_limited";
+        // Per-address throttling must not reveal whether this address has an account.
+        if (isRateLimited(error)) return "sent";
         if (isUnavailable(error)) return "unavailable";
         // Unknown address, sign-ups disabled and similar: report "sent" so the page never
         // reveals whether an account exists.
