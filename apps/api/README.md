@@ -57,7 +57,7 @@ Supabase dev project (Free plan, Singapore):
 3. **In Supabase** *Authentication* -> *URL Configuration*, add the invite redirect
    (`http://localhost:3000/auth/callback`, or whatever `VERINA_AUTH_INVITE_REDIRECT_URL` is) to
    the redirect allow list. The built-in mailer sends only 2 e-mails per hour; configure
-   custom SMTP before inviting more people.
+   reviewed custom SMTP before inviting arbitrary Verina members: the default sender only delivers to Supabase project-team addresses, currently at two messages per hour, and has no delivery SLA. See [Supabase SMTP restrictions](https://supabase.com/docs/guides/auth/auth-smtp) (checked 14 October 2026). Real-person invitations still require the separate privacy/security activation review.
 4. **Apply migrations** (from `apps/api`, with the `.env` in place):
 
    ```bash

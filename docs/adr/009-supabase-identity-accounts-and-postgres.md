@@ -46,7 +46,7 @@ The product owner wants a usable product: a Verina platform administrator create
 
 ### 5. Rate limits (SEC L5, partial)
 
-Per-process token buckets: authentication failures per client address (20 burst, one per 3 s, then `429 rate_limited` with `Retry-After` before authenticating) and invitations plus resends per account (10 burst, one per minute). Limits of this approach: each worker process has its own buckets (the effective limit scales with workers and resets on restart), and the client key is the socket peer, which behind a reverse proxy is the proxy unless trusted forwarded headers are configured. A shared limiter or edge/WAF control is required before multi-instance or internet exposure. Supabase's built-in e-mail sender allows only **2 e-mails per hour** per project; configure custom SMTP in Supabase before inviting more than a couple of people.
+Per-process token buckets: authentication failures per client address (20 burst, one per 3 s, then `429 rate_limited` with `Retry-After` before authenticating) and invitations plus resends per account (10 burst, one per minute). Limits of this approach: each worker process has its own buckets (the effective limit scales with workers and resets on restart), and the client key is the socket peer, which behind a reverse proxy is the proxy unless trusted forwarded headers are configured. A shared limiter or edge/WAF control is required before multi-instance or internet exposure. Supabase's built-in e-mail sender allows only **2 e-mails per hour** per project; the default sender also refuses recipients who are not members of the Supabase project team. Configure reviewed custom SMTP before inviting arbitrary Verina members, regardless of volume.
 
 ### 6. Supabase Postgres and the Data API lock-down (migration 0006)
 
@@ -84,3 +84,20 @@ Per-process token buckets: authentication failures per client address (20 burst,
 ## Open
 
 Shared rate limiting; trusted-proxy client addresses; MFA enforcement on by default; outbox for invite side effects; member removal and e-mail change; pagination of member and organization lists (capped at 1000); a least-privileged database role with RLS policies; an independent audit anchor; retention of directory accounts and bindings; custom SMTP; production enablement review (staging/production remain refused).
+
+## Privacy source review (14 October 2026)
+
+The accounts source and metadata boundaries have a conditional privacy review for gated
+source integration. This is not permission to invite real people or process client matter
+data. [DATA_INVENTORY](../compliance/DATA_INVENTORY.md) records the source-observed account
+holdings and the unresolved activation evidence. A project region is not a guarantee that
+all support, email, web-host or sub-processor processing remains in Singapore.
+
+Supabase's [published DPA](https://supabase.com/legal/customer-resources/data-processing-addendum)
+(Version 1, 1 August 2026, retrieved 14 October 2026) names Supabase Pte. Ltd. Clause 6.1
+provides regional primary storage/processing subject to exceptions; it does not establish
+exclusive regional processing. Confirm the account's applicable agreement and processing
+schedule, sub-processors and support/SMTP locations before real-person activation.
+[Default SMTP](https://supabase.com/docs/guides/auth/auth-smtp) is project-team restricted,
+best effort and not intended for production. An existing email address is not evidence
+that the invitation was delivered. Provider side effects may precede a failed local commit.

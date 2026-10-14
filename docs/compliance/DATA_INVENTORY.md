@@ -125,7 +125,7 @@ At the HTTP boundary the bearer token is verified in memory and never stored or 
 
 ## Accounts, organizations and Supabase (migrations 0005 and 0006, ADR 009; pending PDPA counsel review)
 
-[ADR 009](../adr/009-supabase-identity-accounts-and-postgres.md) adds a development-only path in which platform administrators create organizations and invite members through Supabase Auth, and the Verina database itself is hosted on Supabase Postgres (Free plan, Singapore). Until PDPA counsel and security approve, only synthetic or team-internal test accounts may be invited.
+[ADR 009](../adr/009-supabase-identity-accounts-and-postgres.md) adds a development-only path in which platform administrators create organizations and invite members through Supabase Auth, and the Verina database itself is hosted on Supabase Postgres (Free plan, Singapore). Until PDPA counsel and security approve, source tests use synthetic identities. Team-internal addresses are still real personal data and require the reviewed real-person setup gate before invitation.
 
 | Store | Fields | Purpose | Classification and minimisation |
 | --- | --- | --- | --- |
@@ -136,6 +136,46 @@ At the HTTP boundary the bearer token is verified in memory and never stored or 
 | `directory.changed` audit payload | chain id, acting id, action, organization and target actor ids, roles, flags, revisions, request hash, keyed subject HMAC | Accountability for directory changes (US-54) | Linkable metadata (D-09); no e-mail, display or organization names |
 | `auth.failure` audit payload | reason class, route surface, keyed HMAC of `(issuer, subject)` when the token verified, suppressed count | Security monitoring (SEC M4, V-02) | Linkable metadata; no IP address, token or raw subject is stored |
 
-**Supabase as processor (sub-processor register).** Supabase Inc. would process: authentication identities in `auth.users` (e-mail address, password hash or magic-link state, MFA factors, sign-in timestamps, and IP/user-agent in its auth logs), the invitation e-mails it sends, and, as database host, every Verina table above plus matters and audit data. Region: Singapore (the project's region). Plan: Free, which has no backups or point-in-time recovery and pauses after a week of inactivity. A data processing agreement, transfer assessment for any support or sub-processing outside Singapore, retention of `auth.users` and auth logs, and deletion on member removal are **open** and must be reviewed by PDPA counsel before real users are invited. The Supabase secret key is held only in the server environment.
+**Supabase as processor (sub-processor register).** Supabase (the published DPA retrieved 14 October 2026 names Supabase Pte. Ltd; the applicable account agreement still needs confirmation) would process: authentication identities in `auth.users` (e-mail address, password hash or magic-link state, MFA factors, sign-in timestamps, and IP/user-agent in its auth logs), the invitation e-mails it sends, and, as database host, every Verina table above plus matters and audit data. Region: Singapore (the project's region). Plan: Free, which has no backups or point-in-time recovery and pauses after a week of inactivity. A data processing agreement, transfer assessment for any support or sub-processing outside Singapore, retention of `auth.users` and auth logs, and deletion on member removal are **open** and must be reviewed by PDPA counsel before real users are invited. The Supabase secret key is held only in the server environment.
 
 The access-token `email` claim is not read by Verina. Members can be deactivated but not yet deleted; retention of `directory_accounts`, bindings and Supabase users after deactivation needs a reviewed period.
+
+## Accounts privacy review and activation evidence (14 October 2026)
+
+Scope: source integration of ADR 009 plus the separately reviewed connected web front door;
+no live invitation, credential inspection or deployed processing assessment was performed.
+The earlier migration 0004 paragraph describes its original implementation. ADR 009 adds
+authentication-failure and directory audit events; it supersedes the earlier statement that
+these events are absent when the accounts composition is enabled.
+
+| Boundary | Source-observed result | Remaining evidence before real-person activation |
+| --- | --- | --- |
+| Account directory | Authorized platform or own-organization admins read email, display name, roles and invite status; platform grants do not confer matter access | Approved account notice/purpose, actual admin grants and privilege review |
+| Global unique email | One address can belong to one organization. Authorized administrators can infer an address is already bound through `account_exists`; no other organization's identity or membership is returned | Explicit product/privacy explanation; do not describe this as zero cross-organization inference |
+| Admin request hashes | Raw email/name bodies are absent from receipts/audit, but deterministic SHA-256 request/actor hashes and opaque identifiers remain linkable and may permit guessing known candidate input | Purpose-bound retention, access/export/correction/deletion and backup treatment; hashes are not anonymisation |
+| Provider invitation | Supabase receives email and configured callback destination; bounded existing-user lookup reads project-level auth users transiently in server memory | Applicable DPA, sub-processor/location review, actual redirect/template configuration, email delivery and reconciliation |
+| Browser/web host | Server auth uses Supabase; browser receives HttpOnly auth cookies and protected account/admin views through the configured web host | Web host's permitted commercial use, processor/region/log settings; no token/callback/email values in access or error logs |
+| Deactivation | Directory authority and current replay access are rechecked; historical attribution and auth-provider users remain | Reviewed retention and provider-account revocation/deletion procedure; deactivation is not erasure |
+
+A Singapore project region covers the primary project-data location, not exclusive support,
+SMTP or web-host processing. Supabase's published DPA clause 6.1 preserves processing
+exceptions. Its clauses 11.2 and Schedule 3 describe termination/functional deletion but do
+not prove an application's specific member-deletion or auth-log expiry workflow.
+
+Default Supabase SMTP only serves project-team addresses, is currently limited to two
+messages per hour and has no delivery SLA. A reviewed custom SMTP service is required for
+arbitrary recipients. It introduces a further processor and secret; no service is selected
+by this review. Vercel Hobby is limited to personal non-commercial use; a business product
+cannot infer commercial hosting permission from its existing preview deployment.
+
+Sources (retrieved 14 October 2026): [Supabase regions](https://supabase.com/docs/guides/platform/regions),
+[Supabase DPA](https://supabase.com/legal/customer-resources/data-processing-addendum) clauses 6.1,
+11.2 and Schedule 3, [Supabase sub-processors](https://supabase.com/legal/customer-resources/subprocessor-list),
+[SMTP restrictions](https://supabase.com/docs/guides/auth/auth-smtp),
+[Vercel Hobby terms](https://vercel.com/docs/plans/hobby).
+
+Conditional source integration can proceed subject to current CI and the Scrum Master/QA
+review gate. Real-person activation remains separate: account notice and applicable terms,
+actual service settings, migration/DB privileges, bounded exposure/rate controls, callback
+and session safety, SMTP configuration and a real login/save/reload journey must be evidenced.
+This is a draft technical privacy assessment, not human legal sign-off.
