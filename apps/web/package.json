@@ -14,6 +14,8 @@
   "dependencies": {
     "@gsap/react": "^2.1.2",
     "@phosphor-icons/react": "^2.1.10",
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
     "gsap": "^3.15.0",
     "lenis": "^1.3.26",
     "next": "16.4.0",

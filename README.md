@@ -32,3 +32,30 @@ python -m venv .venv
 ```
 
 Contributors (human or AI): read [AGENTS.md](AGENTS.md) first.
+
+## Local connected accounts (development only)
+
+The public preview stays disconnected. These steps do not authorize client data or
+hosted activation.
+
+1. Copy the root `.env.example` to ignored `apps/web/.env.local`. Fill it locally;
+   use a Supabase publishable/anon key, never a service-role/secret key.
+2. In Supabase Authentication > URL Configuration set Site URL to
+   `http://localhost:3000` and allow exactly `http://localhost:3000/auth/callback`.
+   Do not use wildcard redirects. Enable email, disable public signup/anonymous sign-in,
+   and configure asymmetric signing with JWT lifetime at most 900 seconds.
+3. Apply reviewed API migrations and bootstrap the application directory administrator
+   using the accounts API instructions. An Auth account alone grants no application role.
+   Start the API with development authentication settings and reviewed project JWKS.
+4. Set the local connected flag to 1; run `npm run dev:web`, open `/sign-in`, enter a
+   provisioned synthetic development account and press Send sign-in code. Use the email
+   code or expected link. Links first show Confirm sign-in; Continue to Verina is a
+   same-origin POST. A scanner GET cannot consume the link.
+5. Verify account permissions and matter save/reload against the API/database, including
+   after an API restart. Keep the public deployment disconnected until the hosted gate
+   is evidenced. Shared limiting, CAPTCHA, custom SMTP, script CSP and privacy review
+   remain required. No resource upgrade or live model is enabled here.
+
+The configured public origin must match the browser's exact origin. HTTPS is required
+except for local loopback. Restart the development server after changing variables.
+Never put configuration secrets into chat, screenshots, commits or issues.

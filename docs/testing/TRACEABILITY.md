@@ -81,3 +81,16 @@ Status values: **Planned** (no test yet) · **Partial** (some criteria covered) 
 | US-54 | `tests/api/test_accounts_security_review.py`, `test_accounts_api.py`, `test_gate.py`; `tests/audit/test_supabase_lockdown.py` | Current-authority replay/read/effect checks, refreshed `/me`, exact binding, tenant walls, metadata directory audit, per-process rate limits and Data API denial. MFA, shared limiting, retention/restore and production review remain separate prerequisites. |
 
 US-50/52/53 browser sign-in, account and admin screens require the separately reviewed web slice and a real development setup journey. These backend suites do not mark those stories Done or authorize real client-data processing.
+
+### Connected account and intake source slice
+
+These are synthetic automated source tests. Live provider/browser/database acceptance,
+no-JavaScript execution and manual accessibility remain separate evidence.
+
+| Story / boundary | Executable evidence | Status |
+| --- | --- | --- |
+| US-50 sign-in | `connected/sign-in.test.tsx`, `auth-routes.test.ts`, `front-door-qa.test.ts` | Source tests; actual email/login pending |
+| US-52 account | `connected/account.test.tsx` | Source tests; current directory response contract |
+| US-53 administration | `connected/admin.test.tsx`, `api-proxy.test.ts` | Source tests; live invitation and authorization pending |
+| US-54 front-door security | `connected/mode-gate.test.ts`, `auth-routes.test.ts`, `front-door-qa.test.ts`, `api-proxy.test.ts`, `return-to.test.ts`, `preview-isolation.test.tsx` | Source tests; hosted configuration/CSP/shared limiter pending |
+| T1.2 connected intake | `connected/intake-connected.test.tsx` | Source tests; actual authenticated save/reload/restart pending |

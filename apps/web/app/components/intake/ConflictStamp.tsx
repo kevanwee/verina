@@ -29,13 +29,19 @@ const CONFLICT_STAMP: Record<
   declined: { label: "Declined", icon: Prohibit, tone: undefined },
 };
 
-/** Spoken as "Conflict check: <label>, by <detail>". Text, shape and colour. */
+/**
+ * Spoken as "Conflict check: <label>, by <detail>". Text, shape and colour. Connected mode
+ * has no actor or time to name yet (design exception E-1), so it passes its own spoken
+ * joiner for the revision imprint.
+ */
 export function ConflictStamp({
   stage,
   detail,
+  detailPrefix = ", by ",
 }: {
   stage: ConflictState;
   detail?: string;
+  detailPrefix?: string;
 }) {
   const { label, icon: StampIcon, tone } = CONFLICT_STAMP[stage];
   return (
@@ -54,7 +60,7 @@ export function ConflictStamp({
       </span>
       {detail ? (
         <span className={styles.stampDetail}>
-          <span className="visually-hidden">, by </span>
+          <span className="visually-hidden">{detailPrefix}</span>
           {detail}
         </span>
       ) : null}
