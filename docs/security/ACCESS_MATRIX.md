@@ -190,4 +190,28 @@ With `VERINA_MATTERS_API_ENABLED=true` and `VERINA_ENV` explicitly set to `local
 
 Authorization is unchanged: every route calls the service, and the service applies this matrix. Reason codes map centrally to HTTP status. Missing, other-tenant, walled and non-member matters, and every other matter-route denial (including a member's role or profile denial), return one identical 404 body. 403 is used only for the collection-level create denial. 401 covers authentication failure and a principal deactivated mid-request. Mutations require `Idempotency-Key` (400 if missing or malformed). Non-create mutations require `If-Match` (428 if missing, 400 if malformed, 409 if stale). Reusing one's own key for a different request returns 409. On matter routes, a key whose receipt belongs to another actor returns the uniform 404. Stale `If-Match` on an inaccessible matter is still 404, never 409. The mutation's identity re-check fails closed (503) if it cannot run on the mutation transaction.
 
-Revocation: `current()` re-reads the directory on every check, including inside the mutation transaction (PostgreSQL `FOR SHARE`), so a committed deactivation denies the next check and rolls back an in-flight mutation. This does not revoke identity-provider sessions or tokens, recall data already returned, or end an already-authenticated request when only a binding is removed. Authentication failures and directory changes are not yet audit-chain events. No MFA, assurance level, rate limiting or production identity provider is claimed.
+Revocation: `current()` re-reads the directory on every check, including inside the mutation transaction (PostgreSQL `FOR SHARE`), so a committed deactivation denies the next check and rolls back an in-flight mutation. This does not revoke identity-provider sessions or tokens, recall data already returned, or end an already-authenticated request when only a binding is removed. Since ADR 009, authentication failures and directory changes are audit-chain events, organization deactivation revokes every member, per-process rate limits apply, and the Supabase profile can require `aal2`; no production identity provider, shared rate limiting or production enablement is claimed.
+
+## Accounts, organizations and platform administration (ADR 009)
+
+Decision record: [ADR 009](../adr/009-supabase-identity-accounts-and-postgres.md); HTTP contract: [ACCOUNTS_CONTRACT.md](../api/ACCOUNTS_CONTRACT.md). These actions are enforced by `verina.access.accounts.AccountsService`, not by `MatterAccessPolicy`; the matter matrix above is unchanged. Tests: `apps/api/tests/api/test_accounts_api.py`.
+
+New authority source: the **platform administrator** grant (`platform_admins`, keyed by verified `(issuer, subject)`, created only by the bootstrap CLI). It is not a role in `Role`, is never derived from a token claim, cannot be granted over HTTP, and grants no matter access. When `VERINA_AUTH_ADMIN_REQUIRE_AAL2=true`, it applies only to tokens with `aal2`.
+
+| ID | Caller | Action | Outcome |
+| --- | --- | --- | --- |
+| A01 | any valid token (bound, unbound or deactivated) | `GET /v1/me` | allow: `linked` view or `{"linked": false}` |
+| A02 | missing/invalid token | any accounts route | 401 |
+| A03 | valid but unbound token, deactivated principal or deactivated organization | any route other than `/v1/me` | 401 |
+| A04 | platform admin | list, create, get, update organizations | allow |
+| A05 | tenant_admin, lawyer, partner, requester, knowledge (no platform grant) | any `/v1/admin/organizations*` | 404 `not_found` |
+| A06 | platform admin | list, invite, update, resend for members of any organization | allow |
+| A07 | tenant_admin | list, invite, update, resend for members of **own** organization | allow |
+| A08 | tenant_admin | members of another organization | 404 `not_found` |
+| A09 | lawyer, partner, requester, knowledge | any members route | 404 `not_found` |
+| A10 | platform admin or tenant_admin | demote or deactivate the last active tenant_admin | 409 `last_admin` |
+| A11 | platform admin with `aal1` when admin aal2 is required | platform-admin action | 401 `insufficient_user_authentication` (tenant_admin rights of the same person still apply) |
+| A12 | anyone | invite an e-mail or Supabase user already bound to any organization | 409 `account_exists` |
+| A13 | platform admin | deactivate an organization | allow; every member fails authentication on the next request |
+
+Assignable member roles: `partner`, `lawyer`, `requester`, `knowledge`, `tenant_admin` (non-empty, no duplicates). A tenant_admin may grant `tenant_admin` within their organization. Authority is re-read on the writing transaction, so revoked admins cannot complete a write. Every write commits a metadata-only `directory.changed` audit event in the organization's chain (bootstrap and authentication failures: system chain `_verina_system`).

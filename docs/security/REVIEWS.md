@@ -142,6 +142,13 @@ Approved for **synthetic in-process development checkpoint** by security with ex
 
 Evidence: client/orchestrator/guard tests **73 passed**, Ruff clean, strict mypy clean (27 sources). All provider serialization uses in-process mock transport. Semgrep rule YAML parsed and regex positive/negative fixtures passed; Semgrep binary unavailable locally and its hosted scan is pending. Full npm audit reproduced five High entries with advisory [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm); no mitigation acceptance inferred.
 
+## R-006: Accounts development API source review (14 October 2026)
+Reviewers: cybersecurity agent (independent regression probes), QA agent (independent contract/recovery checks), coordinating Scrum Master agent. Shared-account agent reviews are not human legal approvals.
+
+Scope: ADR 009, organizations/member directory, Supabase public-key retrieval and invitation adapter, metadata audit, migrations 0005/0006. A stale resolved administrative identity originally reached reads/replays/provider effects after revocation. Current-authority checks now precede those paths and hold PostgreSQL authority rows through the operation; independent synthetic regression probes deny revoked platform and organization administrators before effects. `/v1/me` refreshes current roles/binding/active state. Historical secret-scanner allowlists are limited to exact synthetic fixture strings and exact test paths.
+
+Source disposition is conditional on required current-revision CI and recorded SM or QA review. Staging/production routes remain refused. This source review does not authorize live invitations, real matters or public connected mode. Provider settings, privacy assessment, shared rate limits, invitation reconciliation, least-privileged database access and operational recovery remain activation prerequisites. Invitation delivery and subsequent local persistence are separate systems; no exactly-once email claim is made.
+
 ## R-007 — Connected web front door and same-origin proxy (source review)
 
 Date: 2026-10-14 · Reviewer: Codex security analyst (agent) · Scope: ADR 008 connected web candidate. This is a bounded source and synthetic in-process review, not a production or legal approval.

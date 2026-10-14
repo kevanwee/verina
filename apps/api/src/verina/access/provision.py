@@ -11,19 +11,32 @@ Usage (``VERINA_DATABASE_URL`` selects the database; migrations must be applied)
         --subject synthetic-sub-1
 
 Refuses to run unless ``VERINA_ENV`` is explicitly set to ``local`` or ``test`` (the
-settings default is not enough). There is no self-signup and no
-HTTP administration route; production provisioning is a separate, unreviewed design.
-Output never echoes names, subjects or issuers.
+settings default is not enough). Each write is audited atomically in the tenant's chain.
+Output never echoes names, subjects, issuers or e-mail addresses.
+
+Platform-admin bootstrap (ADR 009)::
+
+    python -m verina.access.provision bootstrap-platform-admin --email admin@example.com
+
+invites (or finds) the Supabase user for that address via the Auth admin API and grants the
+platform-admin role to its verified ``(issuer, subject)``. It refuses if any platform admin
+already exists, and runs only when ``VERINA_ENV`` is explicitly ``local``, ``test`` or
+``development`` with ``VERINA_AUTH_ISSUER``, ``VERINA_SUPABASE_URL`` and
+``VERINA_SUPABASE_SECRET_KEY`` configured. Further platform admins are not creatable over HTTP.
 """
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from verina.access.accounts import AccountsError, bootstrap_platform_admin
+from verina.access.auth_admin import AuthAdminError, AuthAdminPort, SupabaseAuthAdmin
 from verina.access.domain import InvalidIdentifierError
 from verina.access.sql_identity import IdentityDirectory
+from verina.access.subject_hmac import derive_subject_key
+from verina.audit.store import SqlAuditStore
 from verina.config import Settings, get_settings
 from verina.db import make_engine
 
@@ -52,17 +65,99 @@ def _parser() -> argparse.ArgumentParser:
     unbind = sub.add_parser("unbind", help="remove an (issuer, subject) binding")
     unbind.add_argument("--issuer", required=True)
     unbind.add_argument("--subject", required=True)
+
+    bootstrap = sub.add_parser(
+        "bootstrap-platform-admin", help="invite the first platform administrator"
+    )
+    bootstrap.add_argument("--email", required=True)
     return parser
 
 
-def run(argv: Sequence[str], settings: Settings) -> int:
+def _explicit_env(settings: Settings, allowed: tuple[str, ...]) -> bool:
+    # The default env is "local"; provisioning must not rely on that default.
+    return "env" in settings.model_fields_set and settings.env in allowed
+
+
+def _supabase_admin(settings: Settings) -> AuthAdminPort:
+    if settings.supabase_url is None or settings.supabase_secret_key is None:
+        raise AuthAdminError("misconfigured")
+    return SupabaseAuthAdmin(
+        settings.supabase_url, settings.supabase_secret_key, issuer=settings.auth_issuer
+    )
+
+
+def _bootstrap(
+    args: argparse.Namespace,
+    settings: Settings,
+    auth_admin_factory: Callable[[Settings], AuthAdminPort],
+) -> int:
+    if not _explicit_env(settings, ("local", "test", "development")):
+        print(
+            "bootstrap requires VERINA_ENV explicitly set to local, test or development",
+            file=sys.stderr,
+        )
+        return 2
+    if not settings.auth_issuer:
+        print("bootstrap requires VERINA_AUTH_ISSUER", file=sys.stderr)
+        return 2
+    engine = make_engine(settings.database_url)
+    store = SqlAuditStore(
+        engine,
+        head_key=(
+            settings.audit_head_key.get_secret_value().encode("utf-8")
+            if settings.audit_head_key is not None
+            else None
+        ),
+    )
+    try:
+        bootstrap_platform_admin(
+            engine,
+            store,
+            auth_admin_factory(settings),
+            issuer=settings.auth_issuer,
+            email=args.email,
+            redirect_to=settings.auth_invite_redirect_url,
+            subject_key=derive_subject_key(settings.audit_head_key),
+        )
+    except AccountsError:
+        print("rejected: a platform administrator already exists", file=sys.stderr)
+        return 1
+    except ValueError:
+        print("rejected: invalid e-mail address", file=sys.stderr)
+        return 1
+    except AuthAdminError as exc:
+        print(f"rejected: identity provider call failed ({exc.kind})", file=sys.stderr)
+        return 1
+    except SQLAlchemyError:
+        print("rejected: directory unavailable (are migrations applied?)", file=sys.stderr)
+        return 1
+    finally:
+        engine.dispose()
+    print("ok: platform administrator invited; they sign in from the invitation e-mail")
+    return 0
+
+
+def run(
+    argv: Sequence[str],
+    settings: Settings,
+    *,
+    auth_admin_factory: Callable[[Settings], AuthAdminPort] = _supabase_admin,
+) -> int:
     args = _parser().parse_args(list(argv))
-    if "env" not in settings.model_fields_set or settings.env not in ("local", "test"):
-        # The default env is "local"; provisioning must not rely on that default.
+    if args.command == "bootstrap-platform-admin":
+        return _bootstrap(args, settings, auth_admin_factory)
+    if not _explicit_env(settings, ("local", "test")):
         print("provisioning requires VERINA_ENV explicitly set to local or test", file=sys.stderr)
         return 2
     engine = make_engine(settings.database_url)
-    directory = IdentityDirectory(engine)
+    key = settings.audit_head_key
+    directory = IdentityDirectory(
+        engine,
+        audit=SqlAuditStore(
+            engine, head_key=key.get_secret_value().encode("utf-8") if key is not None else None
+        ),
+        subject_key=derive_subject_key(key),
+    )
     try:
         if args.command == "principal":
             roles = [r.strip() for r in args.roles.split(",") if r.strip()]

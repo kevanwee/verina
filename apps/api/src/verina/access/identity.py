@@ -20,10 +20,20 @@ _ISSUER = object()
 
 
 class AuthenticationError(Exception):
-    """Missing, malformed, unknown or revoked credential. Deliberately carries no detail."""
+    """Missing, malformed, unknown or revoked credential. Its message carries no detail.
 
-    def __init__(self) -> None:
+    ``reason`` is an internal failure class for the audit chain (``missing_credential``,
+    ``token_rejected``, ``unbound``, ``principal_inactive``, ``organization_inactive`` ...);
+    ``subject`` is the verified ``(issuer, subject)`` when the token itself was valid. Neither
+    is ever returned to the caller; audit records only a keyed HMAC of the subject.
+    """
+
+    def __init__(
+        self, reason: str = "unauthenticated", subject: tuple[str, str] | None = None
+    ) -> None:
         super().__init__("unauthenticated")
+        self.reason = reason
+        self.subject = subject
 
 
 @dataclass(frozen=True, slots=True)

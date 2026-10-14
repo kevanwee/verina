@@ -14,6 +14,13 @@ then held with ``FOR SHARE`` until commit, so a concurrent deactivation is order
 mutation rather than racing it. ``profile`` returns the retained display profile even after
 deactivation (historical attribution); it never grants authority.
 
+Organizations (ADR 009): every principal belongs to the ``organizations`` row whose id is its
+tenant id. ``authenticate`` and ``current`` require that row to exist and be active, so an
+organization deactivation makes all of its principals fail on their next request or check
+(on PostgreSQL the organization row is also held ``FOR SHARE`` inside a mutation).
+:meth:`SqlIdentityAdapter.resolve` exposes the full lookup (principal, platform-admin grant,
+or why the token is not linked) for ``/v1/me`` and the administration routes.
+
 Not covered: identity-provider session revocation (a still-valid token for an active binding
 keeps working until ``exp``), reads already returned to a caller, and directory changes made
 outside this database.
@@ -21,6 +28,7 @@ outside this database.
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,6 +49,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 
+from verina.access.directory_schema import ensure_organization, organizations, platform_admins
 from verina.access.domain import (
     ActorId,
     ActorProfile,
@@ -52,13 +61,18 @@ from verina.access.domain import (
 )
 from verina.access.identity import AuthenticationError, Principal, _issue
 from verina.access.sql_repository import metadata
+from verina.access.subject_hmac import subject_hmac
 from verina.access.tokens import (
     MAX_ISSUER_LENGTH,
     MAX_SUBJECT_LENGTH,
     MAX_TOKEN_BYTES,
     JwtVerifier,
+    KeySourceUnavailable,
     TokenRejected,
+    VerifiedToken,
 )
+from verina.audit.events import DirectoryChanged
+from verina.audit.store import SqlAuditStore
 from verina.db import active_connection, bound_connection_required
 
 identity_principals = Table(
@@ -143,15 +157,48 @@ def _check_text(value: object, limit: int) -> str:
 
 def _bearer(headers: Mapping[str, str]) -> str:
     values = [v for k, v in headers.items() if k.lower() == "authorization"]
+    if not values:
+        raise AuthenticationError("missing_credential")
     if len(values) != 1:
-        raise AuthenticationError()
+        raise AuthenticationError("malformed_credential")
     value = values[0]
     if not isinstance(value, str) or len(value) > MAX_TOKEN_BYTES + 7:
-        raise AuthenticationError()
+        raise AuthenticationError("malformed_credential")
     scheme, _, token = value.partition(" ")
     if scheme.lower() != "bearer" or not token or token != token.strip() or " " in token:
-        raise AuthenticationError()
+        raise AuthenticationError("malformed_credential")
     return token
+
+
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """What a *verified* token resolves to in the Verina directory (never from its claims).
+
+    ``principal`` is set only for an active binding whose principal and organization are both
+    active. ``platform_admin_id`` is set when ``(issuer, subject)`` holds the platform-admin
+    grant. ``unlinked_reason`` explains a missing principal (internal; audit only).
+    """
+
+    token: VerifiedToken
+    principal: Principal | None
+    platform_admin_id: str | None
+    unlinked_reason: str | None
+
+    @property
+    def subject(self) -> tuple[str, str]:
+        return (self.token.issuer, self.token.subject)
+
+
+_PRINCIPAL_COLUMNS = (
+    identity_principals.c.tenant_id,
+    identity_principals.c.actor_id,
+    identity_principals.c.roles,
+    identity_principals.c.active,
+    organizations.c.active.label("organization_active"),
+)
+_PRINCIPAL_ORGANIZATION = identity_principals.join(
+    organizations, organizations.c.id == identity_principals.c.tenant_id
+)
 
 
 class SqlIdentityAdapter:
@@ -179,22 +226,32 @@ class SqlIdentityAdapter:
         except SQLAlchemyError:
             raise IdentityUnavailableError() from None
 
-    def authenticate(self, headers: Mapping[str, str]) -> Principal:
+    @property
+    def verifier(self) -> JwtVerifier:
+        return self._verifier
+
+    def verify(self, headers: Mapping[str, str]) -> VerifiedToken:
+        """Verify the bearer credential only (no directory read)."""
         token = _bearer(headers)
         try:
-            verified = self._verifier.verify(token)
+            return self._verifier.verify(token)
         except TokenRejected:
-            raise AuthenticationError() from None
+            raise AuthenticationError("token_rejected") from None
+        except KeySourceUnavailable:
+            raise IdentityUnavailableError() from None
+
+    def resolve(self, headers: Mapping[str, str]) -> Resolution:
+        """Verify the token, then look up its binding and platform-admin grant.
+
+        Raises :class:`AuthenticationError` only for credential/token failures; a valid but
+        unlinked token returns a :class:`Resolution` without a principal.
+        """
+        verified = self.verify(headers)
         query = (
-            select(
-                identity_principals.c.tenant_id,
-                identity_principals.c.actor_id,
-                identity_principals.c.roles,
-                identity_principals.c.active,
-            )
+            select(*_PRINCIPAL_COLUMNS)
             .select_from(
                 identity_bindings.join(
-                    identity_principals,
+                    _PRINCIPAL_ORGANIZATION,
                     (identity_bindings.c.tenant_id == identity_principals.c.tenant_id)
                     & (identity_bindings.c.actor_id == identity_principals.c.actor_id),
                 )
@@ -204,34 +261,55 @@ class SqlIdentityAdapter:
                 identity_bindings.c.subject == verified.subject,
             )
         )
+        admin_query = select(platform_admins.c.admin_id).where(
+            platform_admins.c.issuer == verified.issuer,
+            platform_admins.c.subject == verified.subject,
+        )
         with self._read() as (conn, _):
             row = conn.execute(query).one_or_none()
-        if row is None or row.active is not True:
-            raise AuthenticationError()
-        try:
-            return _principal_from(row)
-        except DirectoryRecordError:
-            raise AuthenticationError() from None
+            admin_id = conn.execute(admin_query).scalar_one_or_none()
+        principal: Principal | None = None
+        reason: str | None = None
+        if row is None:
+            reason = "unbound"  # also covers a binding whose organization row is missing
+        elif row.active is not True:
+            reason = "principal_inactive"
+        elif row.organization_active is not True:
+            reason = "organization_inactive"
+        else:
+            try:
+                principal = _principal_from(row)
+            except DirectoryRecordError:
+                reason = "directory_record_invalid"
+        return Resolution(
+            verified, principal, admin_id if isinstance(admin_id, str) else None, reason
+        )
+
+    def authenticate(self, headers: Mapping[str, str]) -> Principal:
+        resolution = self.resolve(headers)
+        if resolution.principal is None:
+            raise AuthenticationError(resolution.unlinked_reason or "unbound", resolution.subject)
+        return resolution.principal
 
     def current(self, tenant_id: TenantId, actor_id: ActorId) -> Principal | None:
         if not isinstance(tenant_id, TenantId) or not isinstance(actor_id, ActorId):
             return None
-        query = select(
-            identity_principals.c.tenant_id,
-            identity_principals.c.actor_id,
-            identity_principals.c.roles,
-            identity_principals.c.active,
-        ).where(
-            identity_principals.c.tenant_id == tenant_id.value,
-            identity_principals.c.actor_id == actor_id.value,
+        query = (
+            select(*_PRINCIPAL_COLUMNS)
+            .select_from(_PRINCIPAL_ORGANIZATION)
+            .where(
+                identity_principals.c.tenant_id == tenant_id.value,
+                identity_principals.c.actor_id == actor_id.value,
+            )
         )
         with self._read() as (conn, bound):
             if bound:
-                # Inside a durable mutation: hold the row until commit (PostgreSQL FOR SHARE;
-                # SQLite already serializes writers with BEGIN IMMEDIATE).
+                # Inside a durable mutation: hold the principal and organization rows until
+                # commit (PostgreSQL FOR SHARE; SQLite already serializes writers with
+                # BEGIN IMMEDIATE), so a concurrent deactivation is ordered after the mutation.
                 query = query.with_for_update(read=True)
             row = conn.execute(query).one_or_none()
-        if row is None or row.active is not True:
+        if row is None or row.active is not True or row.organization_active is not True:
             return None
         try:
             principal = _principal_from(row)
@@ -262,23 +340,59 @@ class SqlIdentityAdapter:
 class IdentityDirectory:
     """Local/dev provisioning of synthetic principals and bindings. No HTTP surface.
 
-    Every write bumps the principal ``revision`` and ``updated_at``. Directory changes are not
-    yet written to the audit chain (ADR 007 follow-up).
+    Every write bumps the principal ``revision`` and ``updated_at`` and makes sure the
+    principal's tenant has an ``organizations`` row (ADR 009). With an ``audit`` store (the
+    provisioning CLI always passes one) each write appends a metadata-only
+    ``directory.changed`` event to the tenant's chain in the same transaction; without one
+    (unit-test seeding) nothing is audited.
     """
 
     def __init__(
-        self, engine: Engine, *, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+        self,
+        engine: Engine,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        audit: SqlAuditStore | None = None,
+        subject_key: bytes | None = None,
     ) -> None:
         if engine.dialect.name not in {"sqlite", "postgresql"}:
             raise ValueError("unsupported identity database")
+        if audit is not None and audit._engine is not engine:
+            raise ValueError("directory and audit must share one engine")
         self._engine = engine
         self._clock = clock
+        self._audit = audit
+        self._subject_key = subject_key
 
     def _now(self) -> datetime:
         now = self._clock()
         if not is_utc_time(now):
             raise ValueError("invalid clock")
         return now
+
+    @contextmanager
+    def _write(self, tenant: TenantId) -> Iterator[Connection]:
+        with self._engine.begin() as conn:
+            if self._audit is not None:
+                # Same lock order as matter mutations: tenant chain head first.
+                self._audit.lock_tenant_on_connection(conn, tenant.value)
+            yield conn
+
+    def _record(self, conn: Connection, tenant: TenantId, now: datetime, **fields: Any) -> None:
+        if self._audit is None:
+            return
+        self._audit.append_on_connection(
+            conn,
+            tenant.value,
+            DirectoryChanged(
+                occurred_at=now,
+                tenant_id=tenant.value,
+                actor="cli:provision",
+                actor_kind="cli",
+                organization_id=tenant.value,
+                **fields,
+            ),
+        )
 
     def upsert_principal(
         self,
@@ -304,7 +418,8 @@ class IdentityDirectory:
         key = (identity_principals.c.tenant_id == tenant.value) & (
             identity_principals.c.actor_id == actor.value
         )
-        with self._engine.begin() as conn:
+        with self._write(tenant) as conn:
+            ensure_organization(conn, tenant.value, now)
             current = conn.execute(
                 select(identity_principals.c.revision).where(key).with_for_update()
             ).scalar_one_or_none()
@@ -320,21 +435,33 @@ class IdentityDirectory:
                         updated_at=now,
                     )
                 )
-                return 1
-            values: dict[str, object] = {
-                "roles": encoded,
-                "active": active,
-                "revision": current + 1,
-                "updated_at": now,
-            }
-            if display_name is not None:  # an omitted name keeps the retained profile
-                values["display_name"] = display_name
-            conn.execute(
-                identity_principals.update()
-                .where(key, identity_principals.c.revision == current)
-                .values(**values)
+                revision = 1
+            else:
+                values: dict[str, object] = {
+                    "roles": encoded,
+                    "active": active,
+                    "revision": current + 1,
+                    "updated_at": now,
+                }
+                if display_name is not None:  # an omitted name keeps the retained profile
+                    values["display_name"] = display_name
+                conn.execute(
+                    identity_principals.update()
+                    .where(key, identity_principals.c.revision == current)
+                    .values(**values)
+                )
+                revision = int(current) + 1
+            self._record(
+                conn,
+                tenant,
+                now,
+                action="principal_upserted",
+                target_actor_id=actor.value,
+                roles=tuple(r for r in encoded.split(",") if r),
+                active=active,
+                revision=revision,
             )
-            return int(current) + 1
+            return revision
 
     def set_active(self, tenant_id: str, actor_id: str, active: bool) -> int:
         """Deactivate (or reactivate) without removing the retained profile."""
@@ -345,7 +472,7 @@ class IdentityDirectory:
         key = (identity_principals.c.tenant_id == tenant.value) & (
             identity_principals.c.actor_id == actor.value
         )
-        with self._engine.begin() as conn:
+        with self._write(tenant) as conn:
             current = conn.execute(
                 select(identity_principals.c.revision).where(key).with_for_update()
             ).scalar_one_or_none()
@@ -356,6 +483,15 @@ class IdentityDirectory:
                 .where(key, identity_principals.c.revision == current)
                 .values(active=active, revision=current + 1, updated_at=now)
             )
+            self._record(
+                conn,
+                tenant,
+                now,
+                action="principal_activation_changed",
+                target_actor_id=actor.value,
+                active=active,
+                revision=int(current) + 1,
+            )
             return int(current) + 1
 
     def bind(self, issuer: str, subject: str, tenant_id: str, actor_id: str) -> None:
@@ -364,7 +500,7 @@ class IdentityDirectory:
         subject = _check_text(subject, MAX_SUBJECT_LENGTH)
         tenant, actor = TenantId(tenant_id), ActorId(actor_id)
         now = self._now()
-        with self._engine.begin() as conn:
+        with self._write(tenant) as conn:
             exists = conn.execute(
                 select(identity_principals.c.revision).where(
                     identity_principals.c.tenant_id == tenant.value,
@@ -390,16 +526,42 @@ class IdentityDirectory:
                     created_at=now,
                 )
             )
+            self._record(
+                conn,
+                tenant,
+                now,
+                action="binding_created",
+                target_actor_id=actor.value,
+                subject_hmac=subject_hmac(self._subject_key, issuer, subject),
+            )
 
     def unbind(self, issuer: str, subject: str) -> bool:
         """Remove a binding. New requests with that subject then fail authentication."""
         issuer = _check_text(issuer, MAX_ISSUER_LENGTH)
         subject = _check_text(subject, MAX_SUBJECT_LENGTH)
-        with self._engine.begin() as conn:
+        where = (identity_bindings.c.issuer == issuer) & (identity_bindings.c.subject == subject)
+        with self._engine.connect() as probe:
+            found = probe.execute(
+                select(identity_bindings.c.tenant_id, identity_bindings.c.actor_id).where(where)
+            ).first()
+        if found is None:
+            return False
+        tenant = TenantId(found.tenant_id)
+        now = self._now()
+        with self._write(tenant) as conn:
             result = conn.execute(
                 identity_bindings.delete().where(
-                    identity_bindings.c.issuer == issuer,
-                    identity_bindings.c.subject == subject,
+                    where, identity_bindings.c.tenant_id == tenant.value
                 )
             )
-            return result.rowcount == 1
+            if result.rowcount != 1:
+                return False
+            self._record(
+                conn,
+                tenant,
+                now,
+                action="binding_removed",
+                target_actor_id=found.actor_id,
+                subject_hmac=subject_hmac(self._subject_key, issuer, subject),
+            )
+            return True
