@@ -102,7 +102,7 @@ describe("connected route handlers", () => {
     expect(handlers.length).toBeGreaterThan(0);
     for (const file of handlers) {
       const source = readFileSync(file, "utf8");
-      if (/export (async )?function GET/.test(source)) {
+      if (/export (async function|const) GET\b/.test(source)) {
         expect(source, file).toMatch(/await connection\(\);/);
       }
     }
