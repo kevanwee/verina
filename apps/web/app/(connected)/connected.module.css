@@ -1,0 +1,416 @@
+/*
+ * Connected-mode surfaces (sign-in, account, administration). Tokens from globals.css only.
+ * Shell, panel, field and button styles are reused from the workbench and intake modules;
+ * this file adds only what those do not have.
+ */
+
+/* ---- Top bar --------------------------------------------------------- */
+
+.navList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-6);
+}
+
+.navLink[aria-current="page"] {
+  color: var(--color-ink);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.35em;
+  text-decoration-color: var(--color-accent);
+}
+
+.navButton {
+  display: inline-block;
+  min-height: 2.75rem;
+  padding: var(--space-3) 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-ink-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.navButton:hover {
+  color: var(--color-ink);
+  text-decoration: underline;
+}
+
+/* ---- Page layout ----------------------------------------------------- */
+
+.page {
+  display: grid;
+  gap: var(--space-8);
+  max-width: 60rem;
+}
+
+.narrow {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 34rem;
+}
+
+.pageHead {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 46rem;
+}
+
+.pageTitle {
+  font-size: var(--text-xl);
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+.pageTitle:focus,
+.sectionTitle:focus,
+.alertHeading:focus {
+  outline: none;
+}
+
+.pageTitle:focus-visible,
+.sectionTitle:focus-visible,
+.alertHeading:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 4px;
+}
+
+.sectionTitle {
+  font-size: var(--text-lg);
+}
+
+.lede {
+  color: var(--color-ink-muted);
+  max-width: 60ch;
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+  max-width: 60ch;
+}
+
+.devNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  background: var(--color-surface-sunk);
+  border: var(--rule-width) dashed var(--color-rule-strong);
+  border-radius: var(--radius);
+}
+
+.devNotice > svg {
+  inline-size: 1rem;
+  block-size: 1rem;
+  flex: none;
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---- Notices and alerts --------------------------------------------- */
+
+/* A confirmed fact (signed out, saved). The text carries the meaning. */
+.status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  background: var(--color-surface-sunk);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+}
+
+.status > svg {
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin-top: 0.15em;
+  flex: none;
+  color: var(--status-verified);
+}
+
+.alert {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface-sunk);
+  border: var(--stamp-border-width) solid var(--status-contradicted);
+  border-radius: var(--radius);
+}
+
+.alert[data-tone="unknown"] {
+  border-color: var(--status-unsupported);
+}
+
+.alertHeading > svg {
+  color: var(--status-contradicted);
+}
+
+.alert[data-tone="unknown"] .alertHeading > svg {
+  color: var(--status-unsupported);
+}
+
+.alertHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+}
+
+.alertHeading > svg {
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  flex: none;
+}
+
+.alert p {
+  font-size: var(--text-sm);
+  max-width: 62ch;
+}
+
+.alert .inlineActions {
+  margin-top: var(--space-2);
+}
+
+/* ---- Facts ----------------------------------------------------------- */
+
+.facts {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+  padding-bottom: var(--space-4);
+  border-bottom: var(--rule-width) solid var(--color-rule);
+}
+
+.facts dt {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+}
+
+.facts dd {
+  overflow-wrap: anywhere;
+}
+
+.roleList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.roleTag {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  font-size: var(--text-sm);
+  background: var(--color-surface-sunk);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+}
+
+/* ---- Tables ---------------------------------------------------------- */
+
+.tableWrap {
+  overflow-x: auto;
+  border: var(--rule-width) solid var(--color-rule);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: var(--rule-width) solid var(--color-rule);
+}
+
+.table thead th {
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink-muted);
+  background: var(--color-surface-sunk);
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.table tbody th {
+  font-weight: var(--weight-semibold);
+}
+
+.cellSub {
+  display: block;
+  font-weight: var(--weight-regular);
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.statusText[data-active="false"] {
+  color: var(--color-ink-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.smallButton {
+  min-height: 2.5rem;
+  padding: 0 var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.smallButton:hover {
+  border-color: var(--color-ink-muted);
+  background: var(--color-surface-sunk);
+}
+
+.rowPanel {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--color-surface-sunk);
+  border-radius: var(--radius);
+}
+
+.checkGrid {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.checkGrid > legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: var(--rule-width) solid var(--color-rule);
+  border-radius: var(--radius);
+}
+
+.check:has(input:checked) {
+  border-color: var(--color-accent);
+}
+
+.check input {
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  margin: 0.15em 0 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.check label {
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.checkHelp {
+  grid-column: 2;
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+.checkGrid[data-invalid] .check {
+  border-color: var(--status-contradicted);
+}
+
+/* ---- Loading --------------------------------------------------------- */
+
+/* Static blocks shaped like the content. No shimmer, identical under reduced motion. */
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 46rem;
+}
+
+.skeleton > span {
+  display: block;
+  block-size: 1rem;
+  background: var(--color-surface-sunk);
+  border-radius: var(--radius);
+}
+
+.skeleton > span:first-of-type {
+  inline-size: 40%;
+  block-size: 1.75rem;
+}
+
+.skeleton > span:nth-of-type(2) {
+  inline-size: 75%;
+}
+
+.skeleton > span:nth-of-type(3) {
+  inline-size: 60%;
+}
+
+/* ---- Responsive ------------------------------------------------------ */
+
+@media (max-width: 40rem) {
+  .facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+
+  .table th,
+  .table td {
+    padding: var(--space-3);
+  }
+}

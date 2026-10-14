@@ -46,8 +46,7 @@ export function classifyConnectedPath(pathname: string): ConnectedRouteKind | nu
     pathname === PATHS.signIn ||
     pathname === PATHS.signOut ||
     pathname === PATHS.callback ||
-    pathname === PATHS.session ||
-    pathname === PATHS.signedIn
+    pathname === PATHS.session
   ) {
     return "public";
   }

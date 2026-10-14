@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { readConnectedConfig, type ConnectedConfig } from "@/lib/connected/config";
@@ -82,6 +84,28 @@ describe("connected configuration", () => {
     expect(readConnectedConfig({ ...CONNECTED_ENV, NODE_ENV: "production" })?.secureCookies).toBe(
       true,
     );
+  });
+});
+
+describe("connected route handlers", () => {
+  it("are never prerendered: every GET handler waits for the request first", () => {
+    const root = join(__dirname, "..", "..", "app", "(connected)");
+    const handlers: string[] = [];
+    const walk = (path: string) => {
+      for (const entry of readdirSync(path)) {
+        const full = join(path, entry);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (entry === "route.ts") handlers.push(full);
+      }
+    };
+    walk(root);
+    expect(handlers.length).toBeGreaterThan(0);
+    for (const file of handlers) {
+      const source = readFileSync(file, "utf8");
+      if (/export (async )?function GET/.test(source)) {
+        expect(source, file).toMatch(/await connection\(\);/);
+      }
+    }
   });
 });
 
