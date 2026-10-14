@@ -30,6 +30,7 @@ from verina.access.accounts import AccountsError, Caller, normalise_email
 from verina.access.auth_admin import AuthAdminError
 from verina.access.identity import AuthenticationError
 from verina.access.sql_identity import IdentityUnavailableError
+from verina.api.gate import RateLimited
 from verina.api.matters import (
     ApiError,
     MattersApi,
@@ -119,6 +120,8 @@ def translate(exc: Exception, *, presented: bool) -> ApiError:
     """Central mapping to the generic error contract; unknown exceptions are re-raised."""
     if isinstance(exc, ApiError):
         return exc
+    if isinstance(exc, RateLimited):
+        return ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)})
     if isinstance(exc, AuthenticationError):
         return _unauthenticated(presented)
     if isinstance(exc, AccountsError):
@@ -171,7 +174,12 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
     ) -> Response:
         presented = bool(request.headers.getlist("authorization"))
         try:
-            caller = await caller_for(request, allow_unlinked=allow_unlinked)
+            api.gate.check_client(request)
+            try:
+                caller = await caller_for(request, allow_unlinked=allow_unlinked)
+            except AuthenticationError as failure:
+                await api.gate.failed(request, failure, surface)
+                raise
             return await handler(caller)
         except Exception as exc:  # mapped centrally; unknown errors are re-raised
             try:
@@ -256,6 +264,7 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
         async def handle(caller: Caller) -> Response:
             operation_id = _operation_id(request)
             body = await _body(request, InviteMemberBody)
+            api.gate.allow_invite(caller.key)
 
             def run() -> Any:
                 return service.invite_member(
@@ -302,6 +311,7 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
     async def resend_invite(request: Request, org_id: str, actor_id: str) -> Response:
         async def handle(caller: Caller) -> Response:
             operation_id = _operation_id(request)
+            api.gate.allow_invite(caller.key)
             outcome = await run_in_threadpool(
                 service.resend_invite, caller, operation_id, org_id, actor_id
             )

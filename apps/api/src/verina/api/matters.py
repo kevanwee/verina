@@ -34,6 +34,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints, ValidationError
 from sqlalchemy import Engine
+from starlette.concurrency import run_in_threadpool
 
 from verina.access.accounts import AccountsService
 from verina.access.auth_admin import AuthAdminError, SupabaseAuthAdmin
@@ -62,6 +63,7 @@ from verina.access.tokens import (
     load_jwks,
 )
 from verina.ai.audit import AuditEmissionError
+from verina.api.gate import AuthGate, RateLimited
 from verina.audit.store import SqlAuditStore
 from verina.config import Settings
 from verina.db import make_engine
@@ -170,6 +172,8 @@ def _unauthenticated(presented: bool) -> ApiError:
 def _translate(exc: Exception, *, collection: bool, presented: bool) -> ApiError:
     if isinstance(exc, ApiError):
         return exc
+    if isinstance(exc, RateLimited):
+        return ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)})
     if isinstance(exc, AuthenticationError):
         return _unauthenticated(presented)
     if isinstance(exc, AccessDenied):
@@ -220,6 +224,7 @@ class MattersApi:
     identity: SqlIdentityAdapter
     policy: MatterAccessPolicy
     accounts: AccountsService
+    gate: AuthGate
     closers: tuple[Callable[[], None], ...] = ()
 
     def service_for(self, principal: Principal) -> MatterService:
@@ -354,6 +359,7 @@ def build_matters_api(settings: Settings, *, engine: Engine | None = None) -> Ma
         identity=SqlIdentityAdapter(engine, verifier),
         policy=MatterAccessPolicy(_UnavailableLedger()),
         accounts=accounts,
+        gate=AuthGate(audit, subject_key=derive_subject_key(key)),
         closers=tuple(closers),
     )
 
@@ -429,7 +435,12 @@ def register_matter_routes(app: FastAPI, api: MattersApi) -> None:
     ) -> JSONResponse:
         presented = bool(request.headers.getlist("authorization"))
         try:
-            principal = api.identity.authenticate(request.headers)
+            api.gate.check_client(request)
+            try:
+                principal = await run_in_threadpool(api.identity.authenticate, request.headers)
+            except AuthenticationError as failure:
+                await api.gate.failed(request, failure, "matters")
+                raise
             return await handler(principal)
         except Exception as exc:  # mapped centrally; unknown errors are re-raised
             try:
