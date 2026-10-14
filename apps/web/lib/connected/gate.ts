@@ -1,0 +1,70 @@
+import { NextResponse, type NextRequest } from "next/server";
+import type { ConnectedConfig } from "./config";
+import { classifyConnectedPath, PATHS } from "./routes";
+import { safeReturnTo } from "./return-to";
+
+/**
+ * Result of refreshing the provider session for one request. The proxy copies refreshed
+ * cookies onto `response`; `signedIn` is false when there is no usable session.
+ */
+export type SessionRefresh = (
+  request: NextRequest,
+  config: ConnectedConfig,
+) => Promise<{ response: NextResponse; signedIn: boolean }>;
+
+/** Path Next has no route for, so the rewrite renders the app's own 404 page with status 404. */
+export const NOT_FOUND_REWRITE = "/__verina-not-found";
+
+const NO_STORE = "private, no-store, max-age=0";
+
+export function apiNotFound() {
+  return NextResponse.json(
+    { error: "not_found" },
+    { status: 404, headers: { "Cache-Control": NO_STORE } },
+  );
+}
+
+/**
+ * The request-time mode gate and session step behind proxy.ts.
+ *
+ * - Not a connected route (the whole public preview): passes through untouched. No config is
+ *   read for it, no Supabase client is created and nothing is fetched.
+ * - Connected mode off or incomplete: every connected route answers 404.
+ * - Protected page without a session: redirect to sign-in with a validated returnTo.
+ */
+export async function runGate(
+  request: NextRequest,
+  readConfig: () => ConnectedConfig | null,
+  refresh: SessionRefresh,
+): Promise<NextResponse> {
+  const pathname = request.nextUrl.pathname;
+  const kind = classifyConnectedPath(pathname);
+  if (kind === null) return NextResponse.next();
+
+  const config = readConfig();
+  if (config === null) {
+    if (kind === "api") return apiNotFound();
+    return NextResponse.rewrite(new URL(NOT_FOUND_REWRITE, request.url), { status: 404 });
+  }
+
+  if (kind === "public") {
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", NO_STORE);
+    return response;
+  }
+
+  // "api" and "protected": refresh the session cookie before the handler or page runs, so
+  // a refreshed token is written to the response before anything streams.
+  const { response, signedIn } = await refresh(request, config);
+  response.headers.set("Cache-Control", NO_STORE);
+  if (kind === "api" || signedIn) return response;
+
+  const target = new URL(PATHS.signIn, request.url);
+  const returnTo = safeReturnTo(pathname);
+  if (returnTo) target.searchParams.set("returnTo", returnTo);
+  const redirect = NextResponse.redirect(target, 303);
+  // Keep any cookie the provider cleared or rotated while finding there was no session.
+  for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
+  redirect.headers.set("Cache-Control", NO_STORE);
+  return redirect;
+}
