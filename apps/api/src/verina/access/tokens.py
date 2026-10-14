@@ -19,7 +19,16 @@ Controls (all fail closed with :class:`TokenRejected`, which carries no detail):
   otherwise refused); ``exp``, ``iat`` and ``sub`` are required; ``nbf`` is honoured if present;
 * bounded clock leeway, a maximum ``exp - iat`` lifetime and a maximum token size.
 
-Keys are loaded once from configuration (inline JSON or a local file). No network fetch.
+Keys come from a :class:`KeySource`: either a static set loaded once from configuration (inline
+JSON or a local file) or the bounded HTTPS fetcher in :mod:`verina.access.jwks_fetcher`. Both
+apply the same per-key validation (:func:`parse_jwks`). A key source that cannot supply keys
+raises :class:`KeySourceUnavailable`, which callers map to "service unavailable", never to an
+authentication success.
+
+The ``supabase`` profile (ADR 008) adds provider-specific claim checks: ``role`` must be
+``authenticated``, ``is_anonymous`` must not be true, ``aal`` must be ``aal1`` or ``aal2`` (and
+``aal2`` when ``require_aal2``), and ``sub`` must be a UUID. These checks only *deny*; the
+``aal`` value is reported for step-up decisions and never grants tenant or role authority.
 """
 
 import json
@@ -28,7 +37,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
@@ -52,6 +61,11 @@ MIN_RSA_BITS = 2048
 MAX_LEEWAY_SECONDS = 120
 MAX_SUBJECT_LENGTH = 255
 MAX_ISSUER_LENGTH = 255
+MAX_KID_LENGTH = 128
+
+AuthProfile = Literal["generic", "supabase"]
+_UUID_SUBJECT = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_AAL_VALUES = frozenset({"aal1", "aal2"})
 
 
 class TokenRejected(Exception):  # noqa: N818 - domain vocabulary
@@ -62,21 +76,58 @@ class TokenRejected(Exception):  # noqa: N818 - domain vocabulary
 
 
 class JwksConfigError(ValueError):
-    """The configured key set is unusable. Raised at startup; never at request time."""
+    """A key set is unusable. Raised at startup for static keys; a fetched set that fails
+    this validation is discarded and the last good set is kept."""
+
+
+class KeySourceUnavailable(Exception):  # noqa: N818 - domain vocabulary
+    """No usable verification keys right now (never fetched, or stale beyond the bound).
+
+    Distinct from :class:`TokenRejected`: the token was not judged, so callers answer 503."""
+
+    def __init__(self) -> None:
+        super().__init__("verification keys unavailable")
 
 
 @dataclass(frozen=True, slots=True)
 class VerifiedToken:
-    """The only facts a token contributes: who issued it and the issuer's subject."""
+    """The only facts a token contributes: who issued it and the issuer's subject.
+
+    ``aal`` is the provider's authentication assurance level when the profile reports one
+    (``supabase``). It may only be used to *deny* (step-up); it never grants authority."""
 
     issuer: str
     subject: str
+    aal: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _Key:
     algorithm: str
     key: Any
+
+
+VerificationKey = _Key
+"""Public name for a validated verification key (algorithm + public key object)."""
+
+
+class KeySource(Protocol):
+    def key_for(self, kid: str) -> _Key | None:
+        """The key for ``kid``, or ``None`` if unknown. Raise :class:`KeySourceUnavailable`
+        when no usable key set is available at all."""
+        ...
+
+
+class StaticKeySource:
+    """Keys loaded once from configuration. Rotation is a configuration change and restart."""
+
+    def __init__(self, keys: Mapping[str, _Key]) -> None:
+        if not keys:
+            raise JwksConfigError("at least one verification key required")
+        self._keys = dict(keys)
+
+    def key_for(self, kid: str) -> _Key | None:
+        return self._keys.get(kid)
 
 
 def _number(value: object) -> float | None:
@@ -134,7 +185,12 @@ def load_jwks(source: str) -> Mapping[str, _Key]:
             text = path.read_text(encoding="utf-8")
         except OSError:
             raise JwksConfigError("JWKS file unreadable") from None
-    if len(text.encode("utf-8")) > MAX_JWKS_BYTES:
+    return parse_jwks(text)
+
+
+def parse_jwks(text: str) -> dict[str, _Key]:
+    """Validate a JWKS document given as JSON text; every key must pass the key rules."""
+    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_JWKS_BYTES:
         raise JwksConfigError("JWKS too large")
     try:
         document = json.loads(text)
@@ -160,10 +216,12 @@ class JwtVerifier:
         *,
         issuer: str,
         audience: str,
-        keys: Mapping[str, _Key],
+        keys: Mapping[str, _Key] | KeySource,
         leeway_seconds: int = 30,
         max_lifetime_seconds: int = 3600,
         extra_audiences: Iterable[str] = (),
+        profile: AuthProfile = "generic",
+        require_aal2: bool = False,
     ) -> None:
         if not isinstance(issuer, str) or not 0 < len(issuer) <= MAX_ISSUER_LENGTH:
             raise JwksConfigError("issuer required")
@@ -174,8 +232,13 @@ class JwtVerifier:
         extras = frozenset(extra_audiences)
         if any(not isinstance(a, str) or not 0 < len(a) <= 255 for a in extras):
             raise JwksConfigError("extra audiences must be non-empty strings")
-        if not keys:
-            raise JwksConfigError("at least one verification key required")
+        source: KeySource = StaticKeySource(keys) if isinstance(keys, Mapping) else keys
+        if not callable(getattr(source, "key_for", None)):
+            raise JwksConfigError("a key source is required")
+        if profile not in ("generic", "supabase"):
+            raise JwksConfigError("unknown auth profile")
+        if type(require_aal2) is not bool or (require_aal2 and profile != "supabase"):
+            raise JwksConfigError("require_aal2 needs the supabase profile")
         if type(leeway_seconds) is not int or not 0 <= leeway_seconds <= MAX_LEEWAY_SECONDS:
             raise JwksConfigError("leeway out of range")
         if type(max_lifetime_seconds) is not int or not 60 <= max_lifetime_seconds <= 86400:
@@ -183,11 +246,23 @@ class JwtVerifier:
         self._issuer = issuer
         self._audience = audience
         self._extra_audiences = extras - {audience}
-        self._keys = dict(keys)
+        self._keys = source
+        self._profile: AuthProfile = profile
+        self._require_aal2 = require_aal2
         self._leeway = leeway_seconds
         self._max_lifetime = max_lifetime_seconds
 
+    @property
+    def issuer(self) -> str:
+        return self._issuer
+
+    @property
+    def profile(self) -> AuthProfile:
+        return self._profile
+
     def verify(self, token: str) -> VerifiedToken:
+        """Verify ``token``. Raises :class:`TokenRejected`, or :class:`KeySourceUnavailable`
+        when keys cannot be obtained (the token was then not judged)."""
         if not isinstance(token, str) or len(token) > MAX_TOKEN_BYTES:
             raise TokenRejected()
         if not token.isascii() or _JWT_SHAPE.fullmatch(token) is None:
@@ -230,9 +305,9 @@ class JwtVerifier:
             raise TokenRejected()
         if typ is not None and (not isinstance(typ, str) or typ.lower() not in _ALLOWED_TYP):
             raise TokenRejected()
-        if not isinstance(kid, str):
+        if not isinstance(kid, str) or not 0 < len(kid) <= MAX_KID_LENGTH:
             raise TokenRejected()
-        key = self._keys.get(kid)
+        key = self._keys.key_for(kid)
         if key is None or key.algorithm != alg:
             raise TokenRejected()
         return key
@@ -274,4 +349,22 @@ class JwtVerifier:
             ord(c) < 32 or ord(c) == 127 for c in subject
         ):
             raise TokenRejected()
+        if self._profile == "supabase":
+            return VerifiedToken(self._issuer, subject, self._supabase_aal(claims, subject))
         return VerifiedToken(self._issuer, subject)
+
+    def _supabase_aal(self, claims: dict[str, Any], subject: str) -> str:
+        """Supabase access-token rules (ADR 008). Deny-only: nothing here grants authority."""
+        if claims.get("role") != "authenticated":
+            raise TokenRejected()  # anon / service_role keys and other roles are not users
+        anonymous = claims.get("is_anonymous", False)
+        if type(anonymous) is not bool or anonymous:
+            raise TokenRejected()
+        if _UUID_SUBJECT.fullmatch(subject) is None:
+            raise TokenRejected()
+        aal = claims.get("aal")
+        if not isinstance(aal, str) or aal not in _AAL_VALUES:
+            raise TokenRejected()
+        if self._require_aal2 and aal != "aal2":
+            raise TokenRejected()
+        return aal

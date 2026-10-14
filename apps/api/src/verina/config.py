@@ -17,7 +17,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    env: Literal["local", "test", "staging", "production"] = "local"
+    # "development" is a shared developer deployment (for example the Supabase dev project,
+    # ADR 008). It must be set explicitly and has stricter enablement rules than local/test;
+    # staging and production are refused by the /v1 API in this slice.
+    env: Literal["local", "test", "development", "staging", "production"] = "local"
     log_level: str = "INFO"
     allowed_origins: list[str] = ["http://localhost:3000"]
     # SQLAlchemy URL (ADR 004). Local default is a SQLite file under the git-ignored
@@ -40,10 +43,34 @@ class Settings(BaseSettings):
     # token minted for several APIs is refused).
     auth_extra_audiences: list[str] = Field(default_factory=list)
     # Static public JWKS: inline JSON (starting with "{") or a local file path. Public keys
-    # only; there is no network JWKS fetch in this slice.
+    # only. Mutually exclusive with auth_jwks_url.
     auth_jwks: str | None = None
+    # HTTPS JWKS endpoint (ADR 008), fetched with a bounded cache. Its host must equal the
+    # issuer's host. Mutually exclusive with auth_jwks.
+    auth_jwks_url: str | None = None
+    auth_jwks_cache_ttl_seconds: int = Field(default=600, ge=60, le=86400)
+    auth_jwks_refetch_interval_seconds: int = Field(default=30, ge=1, le=3600)
+    auth_jwks_max_stale_seconds: int = Field(default=21600, ge=60, le=604800)
+    auth_jwks_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     auth_leeway_seconds: int = Field(default=30, ge=0, le=120)
     auth_max_token_lifetime_seconds: int = Field(default=3600, ge=60, le=86400)
+    # Claim profile: "generic" (ADR 007) or "supabase" (ADR 008: role must be
+    # "authenticated", anonymous users refused, aal reported for step-up).
+    auth_profile: Literal["generic", "supabase"] = "generic"
+    # Require aal2 (MFA) on every token. Needs auth_profile=supabase.
+    auth_require_aal2: bool = False
+    # Require aal2 only when acting as a platform administrator. Default false so a dev
+    # project works without MFA enrolment; turn on before any non-development use.
+    auth_admin_require_aal2: bool = False
+
+    # --- Supabase Auth admin (ADR 008) ---------------------------------------------------
+    # Project URL, e.g. https://<ref>.supabase.co (public). Used for invitations only.
+    supabase_url: str | None = None
+    # Secret (sb_secret_...) or legacy service_role key. Server-side only, never logged,
+    # never sent to the browser. Supply via the ignored apps/api/.env or a secret manager.
+    supabase_secret_key: SecretStr | None = None
+    # Where the invite e-mail link lands (must be in Supabase's redirect allow list).
+    auth_invite_redirect_url: str | None = None
 
     # --- AI orchestrator (verina.ai) -------------------------------------------------
     # The key is a SecretStr so it is masked in repr/str/model_dump. Supply it only via

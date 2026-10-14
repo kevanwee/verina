@@ -57,6 +57,7 @@ from verina.access.tokens import (
     MAX_SUBJECT_LENGTH,
     MAX_TOKEN_BYTES,
     JwtVerifier,
+    KeySourceUnavailable,
     TokenRejected,
 )
 from verina.db import active_connection, bound_connection_required
@@ -185,6 +186,8 @@ class SqlIdentityAdapter:
             verified = self._verifier.verify(token)
         except TokenRejected:
             raise AuthenticationError() from None
+        except KeySourceUnavailable:
+            raise IdentityUnavailableError() from None
         query = (
             select(
                 identity_principals.c.tenant_id,

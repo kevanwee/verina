@@ -24,7 +24,7 @@ Status mapping (see ``_MATTER_ERRORS``):
 import logging
 import re
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
@@ -44,13 +44,20 @@ from verina.access.domain import (
     conflict_is_ready,
 )
 from verina.access.identity import AuthenticationError, Principal
+from verina.access.jwks_fetcher import JwksFetcher
 from verina.access.mutations import MutationReplayError, SqlMatterMutationUnitOfWork
 from verina.access.policy import GRANTS, LedgerEntryStatus, MatterAccessPolicy
 from verina.access.service import AccessDenied, MatterService, ModelContext
 from verina.access.sql_identity import IdentityUnavailableError, SqlIdentityAdapter
 from verina.access.sql_repository import MatterStorageError, SqlMatterRepository
 from verina.access.storage_codec import StoredMatterError
-from verina.access.tokens import JwksConfigError, JwtVerifier, load_jwks
+from verina.access.tokens import (
+    JwksConfigError,
+    JwtVerifier,
+    KeySource,
+    VerificationKey,
+    load_jwks,
+)
 from verina.ai.audit import AuditEmissionError
 from verina.audit.store import SqlAuditStore
 from verina.config import Settings
@@ -227,25 +234,79 @@ def explicit_local_env(settings: Settings) -> bool:
     return "env" in settings.model_fields_set and settings.env in ("local", "test")
 
 
-def _verifier_from(settings: Settings) -> JwtVerifier:
-    if not explicit_local_env(settings):
-        # The default env is "local"; enabling must not rely on that default. Only an
-        # explicitly set local/test environment may run the matters API in this slice.
-        raise MattersApiConfigError("matters API requires VERINA_ENV explicitly set to local/test")
-    issuer, audience, jwks = settings.auth_issuer, settings.auth_audience, settings.auth_jwks
-    if not issuer or not audience or not jwks:
-        raise MattersApiConfigError("matters API requires auth_issuer, auth_audience, auth_jwks")
+def check_enablement(settings: Settings) -> None:
+    """Environment gate for the /v1 API (ADR 007, widened by ADR 008).
+
+    * ``local``/``test``: must be explicitly set (the settings default does not count).
+    * ``development``: explicitly set, *and* issuer, audience, an HTTPS ``auth_jwks_url``, an
+      audit head HMAC key and an explicitly configured database URL are all required.
+    * ``staging``/``production``: refused in this slice.
+    """
+    if explicit_local_env(settings):
+        return
+    if "env" not in settings.model_fields_set or settings.env != "development":
+        # The default env is "local"; enabling must not rely on that default.
+        raise MattersApiConfigError(
+            "v1 API requires VERINA_ENV explicitly set to local, test or development"
+        )
+    missing = [
+        name
+        for name, present in (
+            ("auth_issuer", bool(settings.auth_issuer)),
+            ("auth_audience", bool(settings.auth_audience)),
+            ("auth_jwks_url", bool(settings.auth_jwks_url)),
+            ("audit_head_key", settings.audit_head_key is not None),
+            ("database_url", "database_url" in settings.model_fields_set),
+        )
+        if not present
+    ]
+    if missing:
+        raise MattersApiConfigError(f"development env requires: {', '.join(missing)}")
+
+
+def build_verifier(settings: Settings) -> JwtVerifier:
+    """Compose the token verifier from settings, failing closed on incomplete configuration."""
+    check_enablement(settings)
+    issuer, audience = settings.auth_issuer, settings.auth_audience
+    jwks, jwks_url = settings.auth_jwks, settings.auth_jwks_url
+    if not issuer or not audience or not (jwks or jwks_url):
+        raise MattersApiConfigError(
+            "v1 API requires auth_issuer, auth_audience and auth_jwks or auth_jwks_url"
+        )
+    if jwks and jwks_url:
+        raise MattersApiConfigError("auth_jwks and auth_jwks_url are mutually exclusive")
+    if settings.auth_require_aal2 and settings.auth_profile != "supabase":
+        raise MattersApiConfigError("auth_require_aal2 needs auth_profile=supabase")
+    if settings.auth_admin_require_aal2 and settings.auth_profile != "supabase":
+        raise MattersApiConfigError("auth_admin_require_aal2 needs auth_profile=supabase")
     try:
+        keys: Mapping[str, VerificationKey] | KeySource
+        if jwks_url:
+            keys = JwksFetcher(
+                jwks_url,
+                issuer=issuer,
+                ttl_seconds=settings.auth_jwks_cache_ttl_seconds,
+                refetch_interval_seconds=settings.auth_jwks_refetch_interval_seconds,
+                max_stale_seconds=settings.auth_jwks_max_stale_seconds,
+                timeout_seconds=settings.auth_jwks_timeout_seconds,
+            )
+        else:
+            keys = load_jwks(jwks or "")
         return JwtVerifier(
             issuer=issuer,
             audience=audience,
-            keys=load_jwks(jwks),
+            keys=keys,
             leeway_seconds=settings.auth_leeway_seconds,
             max_lifetime_seconds=settings.auth_max_token_lifetime_seconds,
             extra_audiences=settings.auth_extra_audiences,
+            profile=settings.auth_profile,
+            require_aal2=settings.auth_require_aal2,
         )
     except JwksConfigError as exc:
         raise MattersApiConfigError(f"invalid auth configuration: {exc}") from None
+
+
+_verifier_from = build_verifier
 
 
 def build_matters_api(settings: Settings, *, engine: Engine | None = None) -> MattersApi:
