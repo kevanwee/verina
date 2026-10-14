@@ -9,6 +9,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import Connection
 
+from verina.access import directory_schema as _directory  # noqa: F401 - registers accounts
 from verina.access import mutations as _mutations  # noqa: F401 - registers receipt table
 from verina.access import sql_identity as _sql_identity  # noqa: F401 - registers directory
 from verina.access.sql_repository import metadata as matter_metadata
@@ -30,7 +31,12 @@ def _run(connection: Connection) -> None:
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url") or get_settings().database_url
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -24,3 +24,24 @@ regexTarget = "secret"
 # apps/api/tests/api/conftest.py @ d7c7cd3: "ed_key: ed25519.Ed25519PrivateKey" is a class name, not a key.
 paths = ['''^apps/api/tests/api/conftest\.py$''']
 regexes = ['''^ed25519\.Ed25519PrivateKey$''']
+
+[[allowlists]]
+description = "Synthetic local audit HMAC fixture, reviewed 2026-10-14 by security agent"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^apps/api/tests/api/(test_gate|test_auth_admin)\.py$''']
+regexes = ['''^synthetic-test-head-key-0123456789abcdef$''']
+
+[[allowlists]]
+description = "Synthetic Supabase profile audit HMAC fixture, reviewed 2026-10-14 by security agent"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^apps/api/tests/api/test_supabase_profile\.py$''']
+regexes = ['''^synthetic-head-key-0123456789abcdef-0123$''']
+
+[[allowlists]]
+description = "Synthetic idempotency UUID, reviewed 2026-10-14 by security agent"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^apps/web/__tests__/connected/api-proxy\.test\.ts$''']
+regexes = ['''^0b6f0f43-4bd7-4d7c-9a5e-3c0f6c1f9a11$''']
