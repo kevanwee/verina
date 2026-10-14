@@ -414,3 +414,46 @@
     padding: var(--space-3);
   }
 }
+
+/* ---- Connected intake ------------------------------------------------ */
+
+/* Matter references are opaque ids: selectable, tabular, wrap anywhere. */
+.reference {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.metaLine {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+}
+
+.changedMarker {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-ink);
+}
+
+/* A waiver reason kept after a stale result, read-only until the person leaves. */
+.keptReason {
+  margin: 0;
+  padding: var(--space-3);
+  font-family: var(--font-text);
+  font-size: var(--text-read);
+  line-height: var(--leading-read);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--color-surface);
+  border: var(--rule-width) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+}
+
+.comparison {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.comparison dd {
+  overflow-wrap: anywhere;
+}

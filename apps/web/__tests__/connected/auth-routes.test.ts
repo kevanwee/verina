@@ -83,7 +83,7 @@ describe("/auth/callback", () => {
     ["unknown path", "/api/v1/me"],
   ])("rejects an open redirect via the cookie (%s)", async (_label, target) => {
     const response = await callback(callbackRequest("?code=abc", target));
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/account`);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/workbench/intake`);
   });
 
   it("ignores any destination supplied in the query string", async () => {
@@ -92,7 +92,7 @@ describe("/auth/callback", () => {
         callbackRequest(`?code=abc&${param}=${encodeURIComponent("https://evil.example")}`),
       );
       expect(new URL(response.headers.get("location")!).origin).toBe(ORIGIN);
-      expect(response.headers.get("location")).toBe(`${ORIGIN}/account`);
+      expect(response.headers.get("location")).toBe(`${ORIGIN}/workbench/intake`);
     }
   });
 

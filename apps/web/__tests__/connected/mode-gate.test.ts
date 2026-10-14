@@ -25,7 +25,8 @@ function refreshWith(signedIn: boolean) {
   return vi.fn<SessionRefresh>(async () => ({ response: NextResponse.next(), signedIn }));
 }
 
-const PREVIEW_PATHS = ["/", "/workbench", "/workbench/intake", "/robots.txt"];
+/** Never seen by the proxy at all. */
+const PREVIEW_PATHS = ["/", "/workbench", "/robots.txt"];
 const CONNECTED_PAGES = [
   "/sign-in",
   "/sign-out",
@@ -130,6 +131,37 @@ describe("mode gate (proxy.ts)", () => {
     }
     expect(readConfig).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("leaves the preview intake untouched when connected mode is off", async () => {
+    const refresh = refreshWith(true);
+    for (const path of ["/workbench/intake", "/workbench/intake/mtr-1"]) {
+      const response = await runGate(request(path), () => null, refresh);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    }
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("rewrites /workbench/intake to connected intake when on, without redirecting", async () => {
+    const refresh = vi.fn<SessionRefresh>(async (req, _config, respond) => ({
+      response: respond!(req),
+      signedIn: false,
+    }));
+    const fresh = await runGate(request("/workbench/intake"), () => CONFIG, refresh);
+    expect(new URL(fresh.headers.get("x-middleware-rewrite")!).pathname).toBe("/intake-connected");
+    expect(fresh.headers.get("cache-control")).toContain("no-store");
+    const resume = await runGate(request("/workbench/intake/mtr-1"), () => CONFIG, refresh);
+    expect(new URL(resume.headers.get("x-middleware-rewrite")!).pathname).toBe("/intake-connected/mtr-1");
+    const bad = await runGate(request("/workbench/intake/..%2Fadmin"), () => CONFIG, refresh);
+    expect(bad.headers.get("x-middleware-rewrite")).toContain(NOT_FOUND_REWRITE);
+  });
+
+  it("never serves the internal intake path directly", async () => {
+    for (const config of [CONFIG, null]) {
+      const response = await runGate(request("/intake-connected/mtr-1"), () => config, refreshWith(true));
+      expect(response.headers.get("x-middleware-rewrite")).toContain(NOT_FOUND_REWRITE);
+    }
   });
 
   it("answers 404 for every connected page when connected mode is off", async () => {

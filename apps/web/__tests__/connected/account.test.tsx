@@ -175,10 +175,14 @@ describe("account surfaces", () => {
 describe("navigation from /v1/me", () => {
   it("shows Members only to an organization administrator and Admin only to a platform admin", () => {
     const labels = (me: LinkedMe) => navFor(me, "/account").map((entry) => entry.label);
-    expect(labels(LAWYER)).toEqual([NAV.MEMBERS, NAV.ACCOUNT]);
-    expect(labels({ ...LAWYER, roles: ["lawyer"] })).toEqual([NAV.ACCOUNT]);
-    expect(labels({ ...LAWYER, roles: ["lawyer"], platformAdmin: true })).toEqual([NAV.ADMIN, NAV.ACCOUNT]);
-    // tenant_admin without an organization cannot manage members.
+    expect(labels(LAWYER)).toEqual([NAV.INTAKE, NAV.MEMBERS, NAV.ACCOUNT]);
+    expect(labels({ ...LAWYER, roles: ["lawyer"] })).toEqual([NAV.INTAKE, NAV.ACCOUNT]);
+    expect(labels({ ...LAWYER, roles: ["lawyer"], platformAdmin: true })).toEqual([
+      NAV.INTAKE,
+      NAV.ADMIN,
+      NAV.ACCOUNT,
+    ]);
+    // Without an organization there is no intake, and tenant_admin cannot manage members.
     expect(labels({ ...LAWYER, organization: null })).toEqual([NAV.ACCOUNT]);
   });
 

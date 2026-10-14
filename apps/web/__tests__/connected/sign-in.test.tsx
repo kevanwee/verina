@@ -105,7 +105,7 @@ describe("sign-in flow", () => {
     expect(provider.verifyEmailCode).toHaveBeenCalledWith("a@example.com", "123456");
     expect(
       await runSignIn(codeStep, data({ intent: "verify", email: "a@example.com", code: "123456", returnTo: "//evil.example" }), value),
-    ).toEqual({ redirectTo: "/account" });
+    ).toEqual({ redirectTo: "/workbench/intake" });
   });
 
   it("explains a blank, malformed or rejected code", async () => {

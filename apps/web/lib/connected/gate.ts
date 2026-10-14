@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { ConnectedConfig } from "./config";
-import { classifyConnectedPath, PATHS } from "./routes";
+import { classifyConnectedPath, intakeRewriteTarget, PATHS } from "./routes";
 import { safeReturnTo } from "./return-to";
 
 /**
@@ -10,6 +10,8 @@ import { safeReturnTo } from "./return-to";
 export type SessionRefresh = (
   request: NextRequest,
   config: ConnectedConfig,
+  /** Builds the response to continue with (default: NextResponse.next). */
+  respond?: (request: NextRequest) => NextResponse,
 ) => Promise<{ response: NextResponse; signedIn: boolean }>;
 
 /** Path Next has no route for, so the rewrite renders the app's own 404 page with status 404. */
@@ -27,9 +29,11 @@ export function apiNotFound() {
 /**
  * The request-time mode gate and session step behind proxy.ts.
  *
- * - Not a connected route (the whole public preview): passes through untouched. No config is
- *   read for it, no Supabase client is created and nothing is fetched.
- * - Connected mode off or incomplete: every connected route answers 404.
+ * - Not a connected route (/ and /workbench): passes through untouched. No config is read for
+ *   it, no Supabase client is created and nothing is fetched.
+ * - /workbench/intake with connected mode off: passes through untouched to the preview page,
+ *   again without a session or any fetch. With it on: rewritten to the connected intake.
+ * - Connected mode off or incomplete: every other connected route answers 404.
  * - Protected page without a session: redirect to sign-in with a validated returnTo.
  */
 export async function runGate(
@@ -41,10 +45,25 @@ export async function runGate(
   const kind = classifyConnectedPath(pathname);
   if (kind === null) return NextResponse.next();
 
+  const notFound = () => NextResponse.rewrite(new URL(NOT_FOUND_REWRITE, request.url), { status: 404 });
+  if (kind === "internal") return notFound();
+
   const config = readConfig();
   if (config === null) {
+    if (kind === "intake") return NextResponse.next();
     if (kind === "api") return apiNotFound();
-    return NextResponse.rewrite(new URL(NOT_FOUND_REWRITE, request.url), { status: 404 });
+    return notFound();
+  }
+
+  if (kind === "intake") {
+    const target = intakeRewriteTarget(pathname);
+    if (target === null) return notFound();
+    // Signed out is a state of the intake page (sign-in panel), not a redirect.
+    const { response } = await refresh(request, config, (forwarded) =>
+      NextResponse.rewrite(new URL(target, request.url), { request: forwarded }),
+    );
+    response.headers.set("Cache-Control", NO_STORE);
+    return response;
   }
 
   if (kind === "public") {

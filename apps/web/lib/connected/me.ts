@@ -59,6 +59,12 @@ export type NavEntry = { href: string; label: string; current: boolean };
 export function navFor(me: LinkedMe, currentPath: string): NavEntry[] {
   const entries: { href: string; label: string; show: boolean; match: (path: string) => boolean }[] = [
     {
+      href: PATHS.intake,
+      label: NAV.INTAKE,
+      show: me.organization !== null,
+      match: (path) => path === PATHS.intake || path.startsWith(`${PATHS.intake}/`),
+    },
+    {
       href: PATHS.members,
       label: NAV.MEMBERS,
       show: canManageMembers(me),
