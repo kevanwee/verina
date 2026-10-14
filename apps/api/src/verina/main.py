@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from verina import __version__
+from verina.api.accounts import register_account_routes
 from verina.api.matters import build_matters_api, lifespan_for, register_matter_routes
 from verina.config import Settings, get_settings
 from verina.security import add_security_headers
@@ -17,7 +18,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the Verina API. Use with ``uvicorn verina.main:create_app --factory``.
 
     Health-only by default. With ``VERINA_MATTERS_API_ENABLED=true`` the authenticated
-    ``/v1/matters`` routes are registered (ADR 007); incomplete auth configuration raises
+    ``/v1/matters`` routes (ADR 007) and the accounts routes ``/v1/me``,
+    ``/v1/admin/organizations*`` and ``/v1/organizations/{id}/members*`` (ADR 008) are
+    registered; incomplete auth configuration raises
     :class:`~verina.api.matters.MattersApiConfigError` and the app does not start.
     """
     settings = settings or get_settings()
@@ -44,5 +47,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     if matters_api is not None:
         register_matter_routes(app, matters_api)
+        register_account_routes(app, matters_api)
 
     return app

@@ -35,6 +35,8 @@ from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints, ValidationError
 from sqlalchemy import Engine
 
+from verina.access.accounts import AccountsService
+from verina.access.auth_admin import AuthAdminError, SupabaseAuthAdmin
 from verina.access.domain import (
     Action,
     ConflictStatus,
@@ -51,6 +53,7 @@ from verina.access.service import AccessDenied, MatterService, ModelContext
 from verina.access.sql_identity import IdentityUnavailableError, SqlIdentityAdapter
 from verina.access.sql_repository import MatterStorageError, SqlMatterRepository
 from verina.access.storage_codec import StoredMatterError
+from verina.access.subject_hmac import derive_subject_key
 from verina.access.tokens import (
     JwksConfigError,
     JwtVerifier,
@@ -216,6 +219,8 @@ class MattersApi:
     uow: SqlMatterMutationUnitOfWork
     identity: SqlIdentityAdapter
     policy: MatterAccessPolicy
+    accounts: AccountsService
+    closers: tuple[Callable[[], None], ...] = ()
 
     def service_for(self, principal: Principal) -> MatterService:
         # The audit sink is bound to the *authenticated* tenant, never to request input.
@@ -318,6 +323,29 @@ def build_matters_api(settings: Settings, *, engine: Engine | None = None) -> Ma
         engine, head_key=key.get_secret_value().encode("utf-8") if key is not None else None
     )
     repository = SqlMatterRepository(engine)
+    closers: list[Callable[[], None]] = []
+    if isinstance(verifier.key_source, JwksFetcher):
+        closers.append(verifier.key_source.close)
+    auth_admin: SupabaseAuthAdmin | None = None
+    if settings.supabase_url is not None or settings.supabase_secret_key is not None:
+        if settings.supabase_url is None or settings.supabase_secret_key is None:
+            raise MattersApiConfigError("supabase_url and supabase_secret_key go together")
+        try:
+            auth_admin = SupabaseAuthAdmin(
+                settings.supabase_url, settings.supabase_secret_key, issuer=verifier.issuer
+            )
+        except AuthAdminError:
+            raise MattersApiConfigError("invalid Supabase admin configuration") from None
+        closers.append(auth_admin.close)
+    accounts = AccountsService(
+        engine,
+        audit,
+        auth_admin,
+        issuer=verifier.issuer,
+        invite_redirect_url=settings.auth_invite_redirect_url,
+        subject_key=derive_subject_key(key),
+        admin_require_aal2=settings.auth_admin_require_aal2,
+    )
     return MattersApi(
         engine=engine,
         repository=repository,
@@ -325,6 +353,8 @@ def build_matters_api(settings: Settings, *, engine: Engine | None = None) -> Ma
         uow=SqlMatterMutationUnitOfWork(repository, audit),
         identity=SqlIdentityAdapter(engine, verifier),
         policy=MatterAccessPolicy(_UnavailableLedger()),
+        accounts=accounts,
+        closers=tuple(closers),
     )
 
 
@@ -553,6 +583,8 @@ def lifespan_for(api: MattersApi) -> Callable[[FastAPI], Any]:
         try:
             yield
         finally:
+            for close in api.closers:
+                close()
             api.engine.dispose()
 
     return lifespan

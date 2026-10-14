@@ -260,6 +260,10 @@ class JwtVerifier:
     def profile(self) -> AuthProfile:
         return self._profile
 
+    @property
+    def key_source(self) -> KeySource:
+        return self._keys
+
     def verify(self, token: str) -> VerifiedToken:
         """Verify ``token``. Raises :class:`TokenRejected`, or :class:`KeySourceUnavailable`
         when keys cannot be obtained (the token was then not judged)."""
