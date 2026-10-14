@@ -1,4 +1,4 @@
-"""HTTPS JWKS fetcher (ADR 008). httpx MockTransport only; no real network."""
+"""HTTPS JWKS fetcher (ADR 009). httpx MockTransport only; no real network."""
 
 import json
 import threading

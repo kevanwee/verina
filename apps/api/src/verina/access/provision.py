@@ -14,7 +14,7 @@ Refuses to run unless ``VERINA_ENV`` is explicitly set to ``local`` or ``test`` 
 settings default is not enough). Each write is audited atomically in the tenant's chain.
 Output never echoes names, subjects, issuers or e-mail addresses.
 
-Platform-admin bootstrap (ADR 008)::
+Platform-admin bootstrap (ADR 009)::
 
     python -m verina.access.provision bootstrap-platform-admin --email admin@example.com
 

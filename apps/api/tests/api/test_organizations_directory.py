@@ -1,4 +1,4 @@
-"""Organizations, platform-admin grant and directory audit (migration 0005, ADR 008)."""
+"""Organizations, platform-admin grant and directory audit (migration 0005, ADR 009)."""
 
 import json
 from datetime import UTC, datetime

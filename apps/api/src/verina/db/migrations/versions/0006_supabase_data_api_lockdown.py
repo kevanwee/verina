@@ -1,4 +1,4 @@
-"""Lock Verina tables away from Supabase's Data API roles (PostgreSQL only; ADR 008).
+"""Lock Verina tables away from Supabase's Data API roles (PostgreSQL only; ADR 009).
 
 Revision ID: 0006_supabase_data_api_lockdown
 Revises: 0005_accounts_and_organizations

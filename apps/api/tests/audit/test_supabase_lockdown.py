@@ -1,4 +1,4 @@
-"""Supabase Data API lock-down (migration 0006, ADR 008).
+"""Supabase Data API lock-down (migration 0006, ADR 009).
 
 Simulates Supabase's ``anon`` / ``authenticated`` roles and their default grants on a disposable
 PostgreSQL database, runs the migrations, and proves those roles cannot read or write any Verina

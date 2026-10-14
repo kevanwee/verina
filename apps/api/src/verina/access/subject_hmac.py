@@ -1,4 +1,4 @@
-"""Keyed pseudonyms for identity-provider subjects in audit metadata (ADR 008, SEC M4).
+"""Keyed pseudonyms for identity-provider subjects in audit metadata (ADR 009, SEC M4).
 
 Audit events never carry a raw ``(issuer, subject)``. When one must be correlatable (an auth
 failure for a verified but unlinked token, a binding change) the event carries

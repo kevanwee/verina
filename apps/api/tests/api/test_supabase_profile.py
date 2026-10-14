@@ -1,4 +1,4 @@
-"""Supabase claim profile and /v1 enablement rules (ADR 008). Synthetic keys and claims only."""
+"""Supabase claim profile and /v1 enablement rules (ADR 009). Synthetic keys and claims only."""
 
 from typing import Any
 

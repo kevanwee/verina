@@ -1,4 +1,4 @@
-"""Accounts, organizations and members routes under ``/v1`` (ADR 008).
+"""Accounts, organizations and members routes under ``/v1`` (ADR 009).
 
 The exact HTTP contract is ``docs/api/ACCOUNTS_CONTRACT.md``. Routes authenticate with the same
 verified bearer token as the matter routes and resolve authority only from the Verina
@@ -207,9 +207,7 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
     async def list_organizations(request: Request) -> Response:
         async def handle(caller: Caller) -> Response:
             orgs = await run_in_threadpool(service.list_organizations, caller)
-            return ok(
-                {"organizations": [{**o.public(), "member_count": o.member_count} for o in orgs]}
-            )
+            return ok({"organizations": [o.full() for o in orgs]})
 
         return await guarded(request, "admin", handle)
 
@@ -229,7 +227,7 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
     async def get_organization(request: Request, org_id: str) -> Response:
         async def handle(caller: Caller) -> Response:
             view = await run_in_threadpool(service.get_organization, caller, org_id)
-            return ok(view.public())
+            return ok(view.full())
 
         return await guarded(request, "admin", handle)
 
@@ -245,7 +243,7 @@ def register_account_routes(app: FastAPI, api: MattersApi) -> None:
                 )
 
             outcome = await run_in_threadpool(run)
-            return ok(outcome.value.public(), outcome.status)
+            return ok(outcome.value.full(), outcome.status)
 
         return await guarded(request, "admin", handle)
 

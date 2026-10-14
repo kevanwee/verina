@@ -1,4 +1,4 @@
-"""Supabase Auth admin port and platform-admin bootstrap (ADR 008). No real network."""
+"""Supabase Auth admin port and platform-admin bootstrap (ADR 009). No real network."""
 
 import base64
 import json

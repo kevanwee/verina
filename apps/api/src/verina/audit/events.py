@@ -249,7 +249,7 @@ _SUBJECT_HMAC = r"^hmac-sha256:[0-9a-f]{64}$"
 
 
 class DirectoryChanged(BaseModel):
-    """Committed directory, organization or platform-admin write (ADR 008, SEC M4, US-54).
+    """Committed directory, organization or platform-admin write (ADR 009, SEC M4, US-54).
 
     Written in the same transaction as the change, to the organization's chain (or the system
     chain for platform-level writes). Metadata only: opaque ids, roles, flags, revisions and a

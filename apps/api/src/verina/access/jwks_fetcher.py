@@ -1,4 +1,4 @@
-"""Bounded HTTPS JWKS fetcher (ADR 008; closes the ADR 007 "reviewed fetcher" follow-up).
+"""Bounded HTTPS JWKS fetcher (ADR 009; closes the ADR 007 "reviewed fetcher" follow-up).
 
 :class:`JwksFetcher` is a :class:`~verina.access.tokens.KeySource`. Controls:
 

@@ -14,7 +14,7 @@ then held with ``FOR SHARE`` until commit, so a concurrent deactivation is order
 mutation rather than racing it. ``profile`` returns the retained display profile even after
 deactivation (historical attribution); it never grants authority.
 
-Organizations (ADR 008): every principal belongs to the ``organizations`` row whose id is its
+Organizations (ADR 009): every principal belongs to the ``organizations`` row whose id is its
 tenant id. ``authenticate`` and ``current`` require that row to exist and be active, so an
 organization deactivation makes all of its principals fail on their next request or check
 (on PostgreSQL the organization row is also held ``FOR SHARE`` inside a mutation).
@@ -341,7 +341,7 @@ class IdentityDirectory:
     """Local/dev provisioning of synthetic principals and bindings. No HTTP surface.
 
     Every write bumps the principal ``revision`` and ``updated_at`` and makes sure the
-    principal's tenant has an ``organizations`` row (ADR 008). With an ``audit`` store (the
+    principal's tenant has an ``organizations`` row (ADR 009). With an ``audit`` store (the
     provisioning CLI always passes one) each write appends a metadata-only
     ``directory.changed`` event to the tenant's chain in the same transaction; without one
     (unit-test seeding) nothing is audited.

@@ -1,4 +1,4 @@
-"""Accounts routes: /v1/me, platform organizations and members (ADR 008). Synthetic only."""
+"""Accounts routes: /v1/me, platform organizations and members (ADR 009). Synthetic only."""
 
 import json
 from collections.abc import Iterator
@@ -218,14 +218,14 @@ def test_platform_admin_creates_lists_gets_and_updates_organizations(
     assert by_id[org["id"]]["member_count"] == 0
     assert by_id["tenant-a"]["member_count"] == 7
     got = client.get(f"/v1/admin/organizations/{org['id']}", headers=auth(keys, PLATFORM))
-    assert got.json() == org
+    assert got.json() == {**org, "member_count": 0}
     patched = client.patch(
         f"/v1/admin/organizations/{org['id']}",
         headers=write(keys, PLATFORM),
         json={"name": "Invented Firm (Renamed)"},
     )
     assert patched.status_code == 200
-    assert patched.json() == {**org, "name": "Invented Firm (Renamed)"}
+    assert patched.json() == {**org, "name": "Invented Firm (Renamed)", "member_count": 0}
     chain = events(engine, org["id"])
     assert [e["action"] for e in chain] == ["organization_created", "organization_updated"]
     assert all(e["actor"] == "pa_synthetic" for e in chain)
@@ -681,6 +681,45 @@ def test_resend_invite(client: TestClient, keys: Keys, fake: FakeAuthAdmin, engi
     assert client.post(url, headers=write(keys, "sub-a-admin")).status_code == 409
     actions = [e["action"] for e in events(engine, "tenant-a")]
     assert actions.count("invite_resent") == 1 and actions.count("invite_accepted") == 1
+
+
+def test_resend_accepts_an_empty_json_body(
+    client: TestClient, keys: Keys, fake: FakeAuthAdmin
+) -> None:
+    member = invite(client, keys, "tenant-a").json()
+    response = client.post(
+        f"/v1/organizations/tenant-a/members/{member['actor_id']}/resend-invite",
+        headers=write(keys, PLATFORM),
+        json={},
+    )
+    assert (response.status_code, response.json()) == (202, {})
+    assert fake.resends == ["invented.member@example.test"]
+
+
+def test_patch_returns_the_full_member_and_organization(client: TestClient, keys: Keys) -> None:
+    org = client.patch(
+        "/v1/admin/organizations/tenant-b", headers=write(keys, PLATFORM), json={"name": "B"}
+    ).json()
+    assert org == {
+        "id": "tenant-b",
+        "name": "B",
+        "slug": "tenant-b",
+        "active": True,
+        "member_count": 2,
+    }
+    member = client.patch(
+        "/v1/organizations/tenant-b/members/b-lawyer",
+        headers=write(keys, PLATFORM),
+        json={"active": True},
+    ).json()
+    assert set(member) == {
+        "actor_id",
+        "display_name",
+        "email",
+        "roles",
+        "active",
+        "invite_status",
+    }
 
 
 def test_resend_for_inactive_member_or_unknown(client: TestClient, keys: Keys) -> None:

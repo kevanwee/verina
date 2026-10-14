@@ -1,4 +1,4 @@
-"""Accounts and organizations service (ADR 008, docs/api/ACCOUNTS_CONTRACT.md).
+"""Accounts and organizations service (ADR 009, docs/api/ACCOUNTS_CONTRACT.md).
 
 Platform administrators create organizations and invite members; tenant administrators manage
 members of their own organization. Every write commits, in one transaction, the directory
@@ -166,6 +166,10 @@ class OrganizationView:
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "slug": self.slug, "active": self.active}
+
+    def full(self) -> dict[str, Any]:
+        """List/GET/PATCH representation: the organization plus its member count."""
+        return {**self.public(), "member_count": self.member_count}
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,7 +394,12 @@ class AccountsService:
         row = conn.execute(select(organizations).where(organizations.c.id == org_id)).first()
         if row is None:
             return None
-        return OrganizationView(row.id, row.name, row.slug, bool(row.active))
+        members = conn.execute(
+            select(func.count())
+            .select_from(identity_principals)
+            .where(identity_principals.c.tenant_id == org_id)
+        ).scalar_one()
+        return OrganizationView(row.id, row.name, row.slug, bool(row.active), int(members))
 
     @staticmethod
     def _member_from(row: Row[Any]) -> MemberView:

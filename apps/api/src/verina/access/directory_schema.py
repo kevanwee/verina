@@ -1,4 +1,4 @@
-"""Organization, platform-admin and member-account tables (migration 0005, ADR 008).
+"""Organization, platform-admin and member-account tables (migration 0005, ADR 009).
 
 * ``organizations`` - one row per customer organization. Its opaque ``id`` *is* the tenant id
   used by principals, matters and the audit chain. ``active = false`` makes every principal of

@@ -1,4 +1,4 @@
-"""Organizations, platform admins, member accounts and admin idempotency (ADR 008).
+"""Organizations, platform admins, member accounts and admin idempotency (ADR 009).
 
 Revision ID: 0005_accounts_and_organizations
 Revises: 0004_identity_directory

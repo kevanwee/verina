@@ -1,4 +1,4 @@
-"""Per-process abuse controls and authentication-failure audit for ``/v1`` (ADR 008).
+"""Per-process abuse controls and authentication-failure audit for ``/v1`` (ADR 009).
 
 Partially closes SEC L5 and SEC M4 from the ADR 007 enablement gate:
 
@@ -11,7 +11,7 @@ Partially closes SEC L5 and SEC M4 from the ADR 007 enablement gate:
   rate-limited; failures that are not recorded individually are counted in the next event's
   ``suppressed_since_last``. Invitations and resends are limited per calling account.
 
-Limits of per-process limiting (documented in ADR 008): every worker process has its own
+Limits of per-process limiting (documented in ADR 009): every worker process has its own
 buckets, so the effective limit is multiplied by the number of workers and resets on restart;
 the client key is the socket peer address, which behind a reverse proxy is the proxy unless
 the server is run with trusted forwarded headers. A shared store (or the edge/WAF) is required

@@ -1,10 +1,10 @@
-"""Identity-provider administration port: invite users and resend invitations (ADR 008).
+"""Identity-provider administration port: invite users and resend invitations (ADR 009).
 
 :class:`AuthAdminPort` is what the accounts service needs from an identity provider. The
 Supabase implementation calls the Supabase Auth (GoTrue) admin API over HTTPS with the
 project's secret key; :class:`FakeAuthAdmin` is the in-memory test double.
 
-Supabase endpoints used (see ADR 008 for references):
+Supabase endpoints used (see ADR 009 for references):
 
 * ``POST {project}/auth/v1/invite?redirect_to=...`` with ``{"email": ...}`` - creates the user
   if needed and e-mails an invite link. ``200`` returns the user (``id`` is the JWT ``sub``);

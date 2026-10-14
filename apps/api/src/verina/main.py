@@ -19,7 +19,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     Health-only by default. With ``VERINA_MATTERS_API_ENABLED=true`` the authenticated
     ``/v1/matters`` routes (ADR 007) and the accounts routes ``/v1/me``,
-    ``/v1/admin/organizations*`` and ``/v1/organizations/{id}/members*`` (ADR 008) are
+    ``/v1/admin/organizations*`` and ``/v1/organizations/{id}/members*`` (ADR 009) are
     registered; incomplete auth configuration raises
     :class:`~verina.api.matters.MattersApiConfigError` and the app does not start.
     """

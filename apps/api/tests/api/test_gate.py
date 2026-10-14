@@ -1,4 +1,4 @@
-"""Rate limits and authentication-failure audit (ADR 008; SEC M4 and L5, partial)."""
+"""Rate limits and authentication-failure audit (ADR 009; SEC M4 and L5, partial)."""
 
 import json
 from collections.abc import Iterator

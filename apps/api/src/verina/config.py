@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # "development" is a shared developer deployment (for example the Supabase dev project,
-    # ADR 008). It must be set explicitly and has stricter enablement rules than local/test;
+    # ADR 009). It must be set explicitly and has stricter enablement rules than local/test;
     # staging and production are refused by the /v1 API in this slice.
     env: Literal["local", "test", "development", "staging", "production"] = "local"
     log_level: str = "INFO"
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Static public JWKS: inline JSON (starting with "{") or a local file path. Public keys
     # only. Mutually exclusive with auth_jwks_url.
     auth_jwks: str | None = None
-    # HTTPS JWKS endpoint (ADR 008), fetched with a bounded cache. Its host must equal the
+    # HTTPS JWKS endpoint (ADR 009), fetched with a bounded cache. Its host must equal the
     # issuer's host. Mutually exclusive with auth_jwks.
     auth_jwks_url: str | None = None
     auth_jwks_cache_ttl_seconds: int = Field(default=600, ge=60, le=86400)
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     auth_jwks_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     auth_leeway_seconds: int = Field(default=30, ge=0, le=120)
     auth_max_token_lifetime_seconds: int = Field(default=3600, ge=60, le=86400)
-    # Claim profile: "generic" (ADR 007) or "supabase" (ADR 008: role must be
+    # Claim profile: "generic" (ADR 007) or "supabase" (ADR 009: role must be
     # "authenticated", anonymous users refused, aal reported for step-up).
     auth_profile: Literal["generic", "supabase"] = "generic"
     # Require aal2 (MFA) on every token. Needs auth_profile=supabase.
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # project works without MFA enrolment; turn on before any non-development use.
     auth_admin_require_aal2: bool = False
 
-    # --- Supabase Auth admin (ADR 008) ---------------------------------------------------
+    # --- Supabase Auth admin (ADR 009) ---------------------------------------------------
     # Project URL, e.g. https://<ref>.supabase.co (public). Used for invitations only.
     supabase_url: str | None = None
     # Secret (sb_secret_...) or legacy service_role key. Server-side only, never logged,

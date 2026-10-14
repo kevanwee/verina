@@ -25,7 +25,7 @@ apply the same per-key validation (:func:`parse_jwks`). A key source that cannot
 raises :class:`KeySourceUnavailable`, which callers map to "service unavailable", never to an
 authentication success.
 
-The ``supabase`` profile (ADR 008) adds provider-specific claim checks: ``role`` must be
+The ``supabase`` profile (ADR 009) adds provider-specific claim checks: ``role`` must be
 ``authenticated``, ``is_anonymous`` must not be true, ``aal`` must be ``aal1`` or ``aal2`` (and
 ``aal2`` when ``require_aal2``), and ``sub`` must be a UUID. These checks only *deny*; the
 ``aal`` value is reported for step-up decisions and never grants tenant or role authority.
@@ -358,7 +358,7 @@ class JwtVerifier:
         return VerifiedToken(self._issuer, subject)
 
     def _supabase_aal(self, claims: dict[str, Any], subject: str) -> str:
-        """Supabase access-token rules (ADR 008). Deny-only: nothing here grants authority."""
+        """Supabase access-token rules (ADR 009). Deny-only: nothing here grants authority."""
         if claims.get("role") != "authenticated":
             raise TokenRejected()  # anon / service_role keys and other roles are not users
         anonymous = claims.get("is_anonymous", False)

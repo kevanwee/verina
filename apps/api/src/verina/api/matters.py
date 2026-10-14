@@ -245,7 +245,7 @@ def explicit_local_env(settings: Settings) -> bool:
 
 
 def check_enablement(settings: Settings) -> None:
-    """Environment gate for the /v1 API (ADR 007, widened by ADR 008).
+    """Environment gate for the /v1 API (ADR 007, widened by ADR 009).
 
     * ``local``/``test``: must be explicitly set (the settings default does not count).
     * ``development``: explicitly set, *and* issuer, audience, an HTTPS ``auth_jwks_url``, an
