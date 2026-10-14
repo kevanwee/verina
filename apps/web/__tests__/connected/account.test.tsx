@@ -6,7 +6,10 @@ import { ACCOUNT, NAV } from "@/lib/connected/copy-accounts";
 import { navFor, parseMe, type LinkedMe } from "@/lib/connected/me";
 
 const session = vi.fn<() => Promise<SessionState>>();
-vi.mock("@/lib/connected/auth/server", () => ({ getSession: () => session() }));
+vi.mock("@/lib/connected/auth/server", () => ({
+  getSession: () => session(),
+  subjectTag: (subject: string) => `tag:${subject.length}`,
+}));
 
 const { resolveViewer, requireLinked } = await import("@/lib/connected/viewer");
 const { AccountDetails } = await import("../../app/(connected)/_components/AccountDetails");
@@ -129,7 +132,11 @@ describe("routing after sign-in", () => {
 
   it("lets a linked account through", async () => {
     vi.stubGlobal("fetch", meFetch(200, LINKED_BODY));
-    await expect(requireLinked(CONFIG, "/account")).resolves.toEqual({ kind: "linked", me: LAWYER });
+    await expect(requireLinked(CONFIG, "/account")).resolves.toEqual({
+      kind: "linked",
+      me: LAWYER,
+      subject: "tag:7",
+    });
   });
 });
 

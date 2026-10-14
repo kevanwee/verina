@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { ConnectedConfig } from "./config";
-import { getSession } from "./auth/server";
+import { getSession, subjectTag } from "./auth/server";
 import { callUpstream, jsonOf, type FetchLike } from "./api/upstream";
 import { parseMe, type LinkedMe } from "./me";
 import { PATHS } from "./routes";
@@ -12,7 +12,8 @@ import { safeReturnTo } from "./return-to";
 export type Viewer =
   | { kind: "signed_out" }
   | { kind: "unlinked" }
-  | { kind: "linked"; me: LinkedMe }
+  /** `subject` is the opaque tag the browser compares for identity changes. */
+  | { kind: "linked"; me: LinkedMe; subject?: string }
   /** Signed in at the provider, but the API refused the token (401). */
   | { kind: "rejected" }
   /** The provider or the API could not be reached, or answered unexpectedly. */
@@ -37,9 +38,11 @@ export async function resolveViewer(
 /** One /v1/me call per request, however many components ask. */
 export const loadViewer = cache(async (config: ConnectedConfig): Promise<Viewer> => {
   const session = await getSession(config);
-  const token =
-    session.state === "signed_in" ? session.accessToken : session.state === "unavailable" ? "unavailable" : null;
-  return resolveViewer(config, token);
+  if (session.state !== "signed_in") {
+    return resolveViewer(config, session.state === "unavailable" ? "unavailable" : null);
+  }
+  const viewer = await resolveViewer(config, session.accessToken);
+  return viewer.kind === "linked" ? { ...viewer, subject: subjectTag(session.subject) } : viewer;
 });
 
 /**

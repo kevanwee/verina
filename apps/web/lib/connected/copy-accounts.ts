@@ -189,8 +189,9 @@ export const REQUEST = {
   NOT_AVAILABLE_HEADING: "This is not available",
   NOT_AVAILABLE_BODY:
     "It may not exist, or your account may not have access to it. Reload the page to see what you can manage.",
-  INVALID_HEADING: "Check the highlighted fields",
-  INVALID_BODY: "Verina did not accept these details. Nothing was saved.",
+  NOT_SAVED_HEADING: "This change was not saved",
+  INVALID_HEADING: "Verina did not accept these details",
+  INVALID_BODY: "Nothing was saved. Check each field against its hint, then try again.",
   DEFECT_HEADING: "This request could not be completed",
   defectBody: (code: string) =>
     `Nothing new was recorded. Reload the page and try again. If it happens again, tell your Verina administrator and quote code ${code}.`,
