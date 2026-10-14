@@ -58,72 +58,84 @@ VERINA_FUNCTIONS = (
 DATA_API_ROLES = ("anon", "authenticated")
 
 
+# PL/pgSQL templates. @ROLES@, @TABLES@ and @FUNCTIONS@ are replaced with ARRAY literals built
+# from the constants above (never user input); identifiers are quoted with format('%I').
+_LOCKDOWN = """
+DO $$
+DECLARE
+  api_role text;
+  tbl text;
+  fn text;
+  locked boolean := false;
+BEGIN
+  FOREACH api_role IN ARRAY @ROLES@ LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
+      locked := true;
+      FOREACH tbl IN ARRAY @TABLES@ LOOP
+        EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', tbl, api_role);
+      END LOOP;
+      FOREACH fn IN ARRAY @FUNCTIONS@ LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I', fn, api_role);
+      END LOOP;
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM %I',
+        current_schema(), api_role);
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM %I',
+        current_schema(), api_role);
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM %I',
+        current_schema(), api_role);
+    END IF;
+  END LOOP;
+  IF locked THEN
+    FOREACH tbl IN ARRAY @TABLES@ LOOP
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+    END LOOP;
+    -- Trigger functions need no caller grants (EXECUTE is checked at CREATE TRIGGER, by the
+    -- owner), so PUBLIC loses the PostgreSQL default too.
+    FOREACH fn IN ARRAY @FUNCTIONS@ LOOP
+      EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', fn);
+    END LOOP;
+  END IF;
+END
+$$
+"""
+
+_UNLOCK = """
+DO $$
+DECLARE
+  tbl text;
+BEGIN
+  FOREACH tbl IN ARRAY @TABLES@ LOOP
+    EXECUTE format('ALTER TABLE %I DISABLE ROW LEVEL SECURITY', tbl);
+  END LOOP;
+END
+$$
+"""
+
+
 def _array(values: Sequence[str]) -> str:
-    # Constant identifiers defined above; never user input.
-    return "ARRAY[" + ", ".join(f"'{v}'" for v in values) + "]"
+    if not all(v.replace("_", "").replace("()", "").isalnum() for v in values):
+        raise ValueError("unexpected identifier")
+    return "ARRAY[" + ", ".join("'" + v + "'" for v in values) + "]"
+
+
+def _render(template: str) -> str:
+    return (
+        template.replace("@ROLES@", _array(DATA_API_ROLES))
+        .replace("@TABLES@", _array(VERINA_TABLES))
+        .replace("@FUNCTIONS@", _array(VERINA_FUNCTIONS))
+    )
 
 
 def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    op.execute(
-        f"""
-        DO $$
-        DECLARE
-          api_role text;
-          tbl text;
-          fn text;
-          locked boolean := false;
-        BEGIN
-          FOREACH api_role IN ARRAY {_array(DATA_API_ROLES)} LOOP
-            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
-              locked := true;
-              FOREACH tbl IN ARRAY {_array(VERINA_TABLES)} LOOP
-                EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', tbl, api_role);
-              END LOOP;
-              FOREACH fn IN ARRAY {_array(VERINA_FUNCTIONS)} LOOP
-                EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I', fn, api_role);
-              END LOOP;
-              EXECUTE format(
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON TABLES FROM %I',
-                current_schema(), api_role);
-              EXECUTE format(
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM %I',
-                current_schema(), api_role);
-              EXECUTE format(
-                'ALTER DEFAULT PRIVILEGES IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM %I',
-                current_schema(), api_role);
-            END IF;
-          END LOOP;
-          IF locked THEN
-            FOREACH tbl IN ARRAY {_array(VERINA_TABLES)} LOOP
-              EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
-            END LOOP;
-            -- Trigger functions need no caller grants (EXECUTE is checked at CREATE TRIGGER
-            -- by the owner only), so PUBLIC loses the PostgreSQL default too.
-            FOREACH fn IN ARRAY {_array(VERINA_FUNCTIONS)} LOOP
-              EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', fn);
-            END LOOP;
-          END IF;
-        END
-        $$
-        """  # noqa: S608 - constant identifiers only, quoted with %I
-    )
+    op.execute(_render(_LOCKDOWN))
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    op.execute(
-        f"""
-        DO $$
-        DECLARE
-          tbl text;
-        BEGIN
-          FOREACH tbl IN ARRAY {_array(VERINA_TABLES)} LOOP
-            EXECUTE format('ALTER TABLE %I DISABLE ROW LEVEL SECURITY', tbl);
-          END LOOP;
-        END
-        $$
-        """
-    )
+    op.execute(_render(_UNLOCK))

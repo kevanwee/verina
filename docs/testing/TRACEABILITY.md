@@ -69,3 +69,15 @@ Status values: **Planned** (no test yet) · **Partial** (some criteria covered) 
 | NFR-10 performance | perf suite (S7–S8) | 4 |
 | NFR-13 DOCX fidelity | `golden-EN-9-*` | 1 |
 | NFR-15 accessibility | axe in `e2e-*`, manual pass | 4 |
+
+
+## Accounts and identity development slice
+
+| Id | Inspectable suites | Current scope and remaining evidence |
+| --- | --- | --- |
+| EN-16 | `tests/api/test_jwks_fetcher.py`, `test_supabase_profile.py`, `test_auth_admin.py`, `test_gate.py`; `tests/audit/test_supabase_lockdown.py` | Bounded JWKS cache, deny-only Supabase claims, development settings gate, server-only Auth admin adapter, metadata failure audit and local throttling. Supabase live migration and network/browser acceptance are separate. PostgreSQL role-denial tests run in hosted CI; local SQLite skips are not equivalent evidence. |
+| US-47, US-48 | `tests/api/test_accounts_api.py`, `test_organizations_directory.py` | Platform grant, organization CRUD, audited bootstrap and current directory authorization. No HTTP platform-grant creation or automatic matter access. |
+| US-49, US-51 | `tests/api/test_accounts_api.py`, `test_auth_admin.py` | Invitation/binding, organization member roles/activation, last-admin protection, replay behavior and generic failures. External invitation delivery has no transactional outbox or exactly-once guarantee. |
+| US-54 | `tests/api/test_accounts_security_review.py`, `test_accounts_api.py`, `test_gate.py`; `tests/audit/test_supabase_lockdown.py` | Current-authority replay/read/effect checks, refreshed `/me`, exact binding, tenant walls, metadata directory audit, per-process rate limits and Data API denial. MFA, shared limiting, retention/restore and production review remain separate prerequisites. |
+
+US-50/52/53 browser sign-in, account and admin screens require the separately reviewed web slice and a real development setup journey. These backend suites do not mark those stories Done or authorize real client-data processing.

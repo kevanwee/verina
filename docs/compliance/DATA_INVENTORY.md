@@ -78,6 +78,7 @@ The draft reading of section 25 sets no fixed period (primary verification cover
 | Inbound mail service | Email intake | D-02 | TBD | TBD | ENG, S2 |
 | LawNet | Case lookup | Citation strings only; no personal data sent | SG | n/a | PO decision S4 |
 | Singapore Statutes Online | Statute fetch | None sent | SG | n/a | Planned |
+| Supabase (Auth + Postgres, Free plan) | Authentication, invitation e-mail, development database host | Auth identities (e-mail, auth logs incl. IP), D-13 directory and all Verina tables on the dev project | SG (project region); support/sub-processing TBD | TBD (PDPA review) | Development only, ADR 009; DPA and review open |
 
 ## 6. Change log
 
@@ -85,6 +86,7 @@ The draft reading of section 25 sets no fixed period (primary verification cover
 | --- | --- | --- | --- |
 | v0 | 2026-10-13 | Initial inventory aligned with DATA_FLOW v0 | verina-pdpa-counsel |
 | v0 | 2026-10-13 | Engineering addendum: identity directory tables (migration 0004) and the disabled-by-default HTTP boundary; pending PDPA counsel review | verina-engineer |
+| v0 | 2026-10-14 | Engineering addendum: organizations, member e-mail and invite status, platform admins, directory/auth-failure audit metadata, Supabase as processor (ADR 009); pending PDPA counsel review | verina-engineer |
 
 ## Runtime evidence qualification
 
@@ -120,3 +122,20 @@ Migration 0004 implements a first, minimal part of the D-13 user directory for t
 | `identity_principals` | `tenant_id`, `actor_id`, `roles`, `active`, `display_name` (nullable), `revision`, `updated_at` | Authorization source of truth (roles, deactivation) and trusted profile for named attribution | Personal data (T3): the display name identifies the user. It is retained after deactivation because historical conflict/waiver records reference it (D-03), and that retention needs a PDPA-reviewed period |
 
 At the HTTP boundary the bearer token is verified in memory and never stored or logged. Request bodies (titles, waiver reasons) flow only into the existing protected matter columns and receipts described above. Error bodies never echo input. Authentication failures are not yet recorded (V-02 is still target design), and directory changes are not yet audit-chain events. Retention, deletion or anonymisation of bindings and principals, any cross-tenant or cross-issuer subject reuse policy, a production provisioning workflow, and the choice of identity provider (a new sub-processor or customer IdP) require PDPA counsel and security review before any real user is provisioned.
+
+## Accounts, organizations and Supabase (migrations 0005 and 0006, ADR 009; pending PDPA counsel review)
+
+[ADR 009](../adr/009-supabase-identity-accounts-and-postgres.md) adds a development-only path in which platform administrators create organizations and invite members through Supabase Auth, and the Verina database itself is hosted on Supabase Postgres (Free plan, Singapore). Until PDPA counsel and security approve, only synthetic or team-internal test accounts may be invited.
+
+| Store | Fields | Purpose | Classification and minimisation |
+| --- | --- | --- | --- |
+| `organizations` | opaque `id` (= tenant id), `name`, `slug`, `active`, `revision`, timestamps | Customer organization record and the switch that revokes all of its members | Business data; a sole-practitioner firm name may identify a person (T3) |
+| `directory_accounts` | `tenant_id`, `actor_id`, `email` (lower-cased, unique), `invite_status`, `invited_at`, `accepted_at` | Member-management display and the one-account-one-organization rule | Personal data (T3, part of D-13). The e-mail address is stored only here, never in audit events, logs, error bodies or idempotency records |
+| `platform_admins` | `issuer`, `subject`, opaque `admin_id`, `created_at` | Verina operator grant | Personal data (T3, pseudonymous subject); the bootstrap e-mail address is not stored in Verina |
+| `admin_idempotency` | scope, operation id, SHA-256 actor key, action, request hash, resource id, status, audit event id | Safe retries of administrative writes | Linkable metadata; request bodies (with e-mail addresses and names) are stored only as a hash |
+| `directory.changed` audit payload | chain id, acting id, action, organization and target actor ids, roles, flags, revisions, request hash, keyed subject HMAC | Accountability for directory changes (US-54) | Linkable metadata (D-09); no e-mail, display or organization names |
+| `auth.failure` audit payload | reason class, route surface, keyed HMAC of `(issuer, subject)` when the token verified, suppressed count | Security monitoring (SEC M4, V-02) | Linkable metadata; no IP address, token or raw subject is stored |
+
+**Supabase as processor (sub-processor register).** Supabase Inc. would process: authentication identities in `auth.users` (e-mail address, password hash or magic-link state, MFA factors, sign-in timestamps, and IP/user-agent in its auth logs), the invitation e-mails it sends, and, as database host, every Verina table above plus matters and audit data. Region: Singapore (the project's region). Plan: Free, which has no backups or point-in-time recovery and pauses after a week of inactivity. A data processing agreement, transfer assessment for any support or sub-processing outside Singapore, retention of `auth.users` and auth logs, and deletion on member removal are **open** and must be reviewed by PDPA counsel before real users are invited. The Supabase secret key is held only in the server environment.
+
+The access-token `email` claim is not read by Verina. Members can be deactivated but not yet deleted; retention of `directory_accounts`, bindings and Supabase users after deactivation needs a reviewed period.

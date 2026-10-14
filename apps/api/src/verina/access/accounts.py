@@ -291,15 +291,17 @@ class AccountsService:
         return acting, tenant
 
     def _recheck(self, conn: Connection, caller: Caller, acting: _Acting, org_id: str) -> None:
-        """Re-read the caller's authority on the writing transaction (revocation)."""
+        """Re-read and hold current authority until protected reads/effects finish."""
         if acting.kind == "platform_admin":
             row = conn.execute(
-                select(platform_admins.c.admin_id).where(
+                select(platform_admins.c.admin_id)
+                .where(
                     platform_admins.c.issuer == caller.issuer,
                     platform_admins.c.subject == caller.subject,
                 )
+                .with_for_update(read=True)
             ).first()
-            if row is None:
+            if row is None or row.admin_id != acting.actor:
                 raise AccountsError("not_found")
             return
         row = conn.execute(
@@ -309,12 +311,19 @@ class AccountsService:
             .select_from(
                 identity_principals.join(
                     organizations, organizations.c.id == identity_principals.c.tenant_id
+                ).join(
+                    identity_bindings,
+                    (identity_bindings.c.tenant_id == identity_principals.c.tenant_id)
+                    & (identity_bindings.c.actor_id == identity_principals.c.actor_id),
                 )
             )
             .where(
                 identity_principals.c.tenant_id == org_id,
                 identity_principals.c.actor_id == acting.actor,
+                identity_bindings.c.issuer == caller.issuer,
+                identity_bindings.c.subject == caller.subject,
             )
+            .with_for_update(read=True)
         ).first()
         try:
             ok = (
@@ -446,12 +455,24 @@ class AccountsService:
     # ---- identity ----------------------------------------------------------------------
 
     def me(self, caller: Caller) -> dict[str, Any]:
-        """``GET /v1/me``. Also marks a pending invitation accepted on first sign-in."""
+        """Refresh directory facts; accept an invitation only for a current binding."""
         principal = caller.principal
-        is_admin = caller.platform_admin_id is not None
-        if principal is None:
+        with self._engine.begin() as conn:
+            if principal is not None:
+                # Keep the same chain -> authority lock order as administrative writes.
+                self._audit.lock_tenant_on_connection(conn, principal.tenant_id.value)
+            admin_id = conn.execute(
+                select(platform_admins.c.admin_id)
+                .where(
+                    platform_admins.c.issuer == caller.issuer,
+                    platform_admins.c.subject == caller.subject,
+                )
+                .with_for_update(read=True)
+            ).scalar_one_or_none()
+            is_admin = admin_id is not None
+            unbound: dict[str, Any] = {"linked": False}
             if is_admin:
-                return {
+                unbound = {
                     "linked": True,
                     "actor_id": None,
                     "display_name": None,
@@ -459,77 +480,83 @@ class AccountsService:
                     "roles": [],
                     "platform_admin": True,
                 }
-            return {"linked": False}
-        tenant, actor = principal.tenant_id.value, principal.actor_id.value
-        with self._engine.connect() as conn:
+            if principal is None:
+                return unbound
+            tenant, actor = principal.tenant_id.value, principal.actor_id.value
             row = conn.execute(
                 select(
                     identity_principals.c.display_name,
+                    identity_principals.c.roles,
                     organizations.c.id,
                     organizations.c.name,
                     organizations.c.slug,
-                    directory_accounts.c.invite_status,
                 )
                 .select_from(
                     identity_principals.join(
                         organizations, organizations.c.id == identity_principals.c.tenant_id
-                    ).outerjoin(
-                        directory_accounts,
-                        (directory_accounts.c.tenant_id == identity_principals.c.tenant_id)
-                        & (directory_accounts.c.actor_id == identity_principals.c.actor_id),
+                    ).join(
+                        identity_bindings,
+                        (identity_bindings.c.tenant_id == identity_principals.c.tenant_id)
+                        & (identity_bindings.c.actor_id == identity_principals.c.actor_id),
                     )
                 )
                 .where(
                     identity_principals.c.tenant_id == tenant,
                     identity_principals.c.actor_id == actor,
+                    identity_principals.c.active.is_(True),
+                    organizations.c.active.is_(True),
+                    identity_bindings.c.issuer == caller.issuer,
+                    identity_bindings.c.subject == caller.subject,
                 )
+                .with_for_update(read=True)
             ).first()
-        if row is None:  # deactivated/removed between resolve and here
-            return {"linked": False}
-        if row.invite_status == "pending":
-            self._accept_invite(principal)
-        return {
-            "linked": True,
-            "actor_id": actor,
-            "display_name": row.display_name,
-            "organization": {"id": row.id, "name": row.name, "slug": row.slug},
-            "roles": sorted(r.value for r in principal.roles),
-            "platform_admin": is_admin,
-        }
+            if row is None:
+                return unbound
+            try:
+                roles = sorted(r.value for r in _decode_roles(row.roles))
+            except DirectoryRecordError:
+                return unbound
+            self._accept_invite(conn, principal)
+            return {
+                "linked": True,
+                "actor_id": actor,
+                "display_name": row.display_name,
+                "organization": {"id": row.id, "name": row.name, "slug": row.slug},
+                "roles": roles,
+                "platform_admin": is_admin,
+            }
 
-    def _accept_invite(self, principal: Principal) -> None:
+    def _accept_invite(self, conn: Connection, principal: Principal) -> None:
         tenant, actor = principal.tenant_id.value, principal.actor_id.value
         now = self._clock()
-        with self._engine.begin() as conn:
-            self._audit.lock_tenant_on_connection(conn, tenant)
-            result = conn.execute(
-                directory_accounts.update()
-                .where(
-                    directory_accounts.c.tenant_id == tenant,
-                    directory_accounts.c.actor_id == actor,
-                    directory_accounts.c.invite_status == "pending",
-                )
-                .values(invite_status="accepted", accepted_at=now)
+        result = conn.execute(
+            directory_accounts.update()
+            .where(
+                directory_accounts.c.tenant_id == tenant,
+                directory_accounts.c.actor_id == actor,
+                directory_accounts.c.invite_status == "pending",
             )
-            if result.rowcount == 1:
-                self._audit.append_on_connection(
-                    conn,
-                    tenant,
-                    DirectoryChanged(
-                        occurred_at=now,
-                        tenant_id=tenant,
-                        actor=actor,
-                        actor_kind="member",
-                        action="invite_accepted",
-                        organization_id=tenant,
-                        target_actor_id=actor,
-                    ),
-                )
+            .values(invite_status="accepted", accepted_at=now)
+        )
+        if result.rowcount == 1:
+            self._audit.append_on_connection(
+                conn,
+                tenant,
+                DirectoryChanged(
+                    occurred_at=now,
+                    tenant_id=tenant,
+                    actor=actor,
+                    actor_kind="member",
+                    action="invite_accepted",
+                    organization_id=tenant,
+                    target_actor_id=actor,
+                ),
+            )
 
     # ---- organizations -----------------------------------------------------------------
 
     def list_organizations(self, caller: Caller) -> list[OrganizationView]:
-        self._require_platform(caller)
+        acting = self._require_platform(caller)
         counts = (
             select(
                 identity_principals.c.tenant_id.label("tenant_id"),
@@ -538,7 +565,8 @@ class AccountsService:
             .group_by(identity_principals.c.tenant_id)
             .subquery()
         )
-        with self._engine.connect() as conn:
+        with self._engine.begin() as conn:
+            self._recheck(conn, caller, acting, SYSTEM_CHAIN_ID)
             rows = conn.execute(
                 select(organizations, counts.c.members)
                 .select_from(
@@ -553,8 +581,9 @@ class AccountsService:
         ]
 
     def get_organization(self, caller: Caller, org_id: str) -> OrganizationView:
-        self._require_platform(caller)
-        with self._engine.connect() as conn:
+        acting = self._require_platform(caller)
+        with self._engine.begin() as conn:
+            self._recheck(conn, caller, acting, SYSTEM_CHAIN_ID)
             view = self._org_view(conn, org_id) if TenantId.parse(org_id) else None
         if view is None:
             raise AccountsError("not_found")
@@ -574,13 +603,13 @@ class AccountsService:
             with self._engine.begin() as conn:
                 # The system chain lock serialises organization creation (idempotency + slug).
                 self._audit.lock_tenant_on_connection(conn, scope)
+                self._recheck(conn, caller, acting, scope)
                 replay = self._replay(conn, scope, operation_id, caller, action, rhash)
                 if replay is not None:
                     view = self._org_view(conn, replay.resource_id)
                     if view is None:  # pragma: no cover - organizations are never deleted
                         raise AccountsError("not_found")
                     return Outcome(replay.status, view)
-                self._recheck(conn, caller, acting, scope)
                 taken = conn.execute(
                     select(organizations.c.id).where(organizations.c.slug == slug)
                 ).first()
@@ -637,9 +666,9 @@ class AccountsService:
         now = self._clock()
         with self._engine.begin() as conn:
             self._audit.lock_tenant_on_connection(conn, org_id)
+            self._recheck(conn, caller, acting, org_id)
             replay = self._replay(conn, org_id, operation_id, caller, action, rhash)
             if replay is None:
-                self._recheck(conn, caller, acting, org_id)
                 row = conn.execute(
                     select(organizations).where(organizations.c.id == org_id).with_for_update()
                 ).one()
@@ -679,8 +708,9 @@ class AccountsService:
         return view
 
     def list_members(self, caller: Caller, org_id: str) -> list[MemberView]:
-        _, tenant = self._require_org_admin(caller, org_id)
-        with self._engine.connect() as conn:
+        acting, tenant = self._require_org_admin(caller, org_id)
+        with self._engine.begin() as conn:
+            self._recheck(conn, caller, acting, tenant.value)
             self._existing_org(conn, tenant)
             rows = conn.execute(
                 self._members_query()
@@ -708,7 +738,9 @@ class AccountsService:
         rhash = request_hash(
             action, tenant.value, {"email": address, "name": name, "roles": list(role_values)}
         )
-        with self._engine.connect() as conn:
+        with self._engine.begin() as conn:
+            self._audit.lock_tenant_on_connection(conn, tenant.value)
+            self._recheck(conn, caller, acting, tenant.value)
             org = self._existing_org(conn, tenant)
             replay = self._replay(conn, tenant.value, operation_id, caller, action, rhash)
             if replay is not None:
@@ -717,18 +749,18 @@ class AccountsService:
                 raise AccountsError("organization_inactive")
             if self._email_taken(conn, address):
                 raise AccountsError("account_exists")
-        if self._auth_admin is None:
-            raise AuthAdminError("misconfigured")
-        subject = self._auth_admin.invite_user(address, self._redirect)
+            if self._auth_admin is None:
+                raise AuthAdminError("misconfigured")
+            subject = self._auth_admin.invite_user(address, self._redirect)
         actor_id = "act_" + uuid4().hex
         now = self._clock()
         try:
             with self._engine.begin() as conn:
                 self._audit.lock_tenant_on_connection(conn, tenant.value)
+                self._recheck(conn, caller, acting, tenant.value)
                 replay = self._replay(conn, tenant.value, operation_id, caller, action, rhash)
                 if replay is not None:
                     return self._replayed_member(conn, tenant, replay)
-                self._recheck(conn, caller, acting, tenant.value)
                 if not self._existing_org(conn, tenant).active:
                     raise AccountsError("organization_inactive")
                 bound = conn.execute(
@@ -848,17 +880,18 @@ class AccountsService:
         )
         if actor is None:
             raise AccountsError("not_found")
-        with self._engine.connect() as conn:
+        with self._engine.begin() as conn:
+            self._recheck(conn, caller, acting, tenant.value)
             self._existing_org(conn, tenant)
             if self._member_view(conn, tenant.value, actor.value) is None:
                 raise AccountsError("not_found")
         now = self._clock()
         with self._engine.begin() as conn:
             self._audit.lock_tenant_on_connection(conn, tenant.value)
+            self._recheck(conn, caller, acting, tenant.value)
             replay = self._replay(conn, tenant.value, operation_id, caller, action, rhash)
             if replay is not None:
                 return self._replayed_member(conn, tenant, replay)
-            self._recheck(conn, caller, acting, tenant.value)
             key = (identity_principals.c.tenant_id == tenant.value) & (
                 identity_principals.c.actor_id == actor.value
             )
@@ -940,7 +973,9 @@ class AccountsService:
         actor = ActorId.parse(actor_id)
         action = "resend_invite"
         rhash = request_hash(action, tenant.value, {"actor_id": actor_id})
-        with self._engine.connect() as conn:
+        with self._engine.begin() as conn:
+            self._audit.lock_tenant_on_connection(conn, tenant.value)
+            self._recheck(conn, caller, acting, tenant.value)
             org = self._existing_org(conn, tenant)
             replay = self._replay(conn, tenant.value, operation_id, caller, action, rhash)
             if replay is not None:
@@ -958,7 +993,18 @@ class AccountsService:
             raise AuthAdminError("misconfigured")
         now = self._clock()
         try:
-            self._auth_admin.resend_invite(member.email, self._redirect)
+            with self._engine.begin() as conn:
+                self._audit.lock_tenant_on_connection(conn, tenant.value)
+                self._recheck(conn, caller, acting, tenant.value)
+                current_org = self._existing_org(conn, tenant)
+                current_member = self._member_view(conn, tenant.value, actor.value)
+                if not current_org.active:
+                    raise AccountsError("organization_inactive")
+                if current_member is None or not current_member.active:
+                    raise AccountsError("member_inactive")
+                if current_member.invite_status == "accepted":
+                    raise AccountsError("invite_already_accepted")
+                self._auth_admin.resend_invite(member.email, self._redirect)
         except InviteAlreadyAccepted:
             with self._engine.begin() as conn:
                 self._audit.lock_tenant_on_connection(conn, tenant.value)
@@ -984,10 +1030,10 @@ class AccountsService:
             raise AccountsError("invite_already_accepted") from None
         with self._engine.begin() as conn:
             self._audit.lock_tenant_on_connection(conn, tenant.value)
+            self._recheck(conn, caller, acting, tenant.value)
             replay = self._replay(conn, tenant.value, operation_id, caller, action, rhash)
             if replay is not None:
                 return Outcome(replay.status, None)
-            self._recheck(conn, caller, acting, tenant.value)
             event_id = self._event(
                 conn,
                 tenant.value,

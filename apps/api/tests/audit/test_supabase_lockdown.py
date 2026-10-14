@@ -188,3 +188,27 @@ def test_lockdown_is_a_no_op_without_supabase_roles(engine: Engine) -> None:
             )
         ).scalar_one()
     assert enabled is False
+
+
+def test_offline_lockdown_sql_preserves_postgres_format_identifiers() -> None:
+    """Exported SQL must run raw, without a driver's percent interpolation."""
+    from io import StringIO
+
+    from alembic import command
+
+    from verina.db import alembic_config
+
+    output = StringIO()
+    config = alembic_config()
+    config.output_buffer = output
+    config.set_main_option("sqlalchemy.url", "postgresql+psycopg://unused/unused")
+    command.upgrade(config, "0005_accounts_and_organizations:head", sql=True)
+    sql = output.getvalue()
+    assert "ALTER TABLE %I ENABLE ROW LEVEL SECURITY" in sql
+    assert "REVOKE ALL ON FUNCTION %s FROM PUBLIC" in sql
+    assert "%%" not in sql
+    assert "@TABLES@" not in sql
+    output.seek(0)
+    output.truncate(0)
+    command.downgrade(config, "head:0005_accounts_and_organizations", sql=True)
+    assert "ALTER TABLE %I DISABLE ROW LEVEL SECURITY" in output.getvalue()

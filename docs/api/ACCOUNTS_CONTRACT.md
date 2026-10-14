@@ -24,3 +24,19 @@ All routes under the existing /v1 router, same auth (Bearer access token from Su
 ## Notes
 - Email is stored in the Verina directory only as needed for member management display (PDPA: minimal; document in DATA_INVENTORY). Supabase auth.users holds the auth identity.
 - Platform admin grant lives in its own table keyed by (issuer, subject), bootstrapped only by CLI (`python -m verina.access.provision bootstrap-platform-admin --email ...` which invites/looks up the Supabase user) and refuses if one exists.
+
+## Implementation clarifications (API slice, ADR 009)
+
+These refine, and do not change, the shapes above. Decision record: [ADR 009](../adr/009-supabase-identity-accounts-and-postgres.md).
+
+- Routes exist only when `VERINA_MATTERS_API_ENABLED=true` (the `/v1` switch).
+- `GET /v1/me` for an org-less platform admin: `actor_id` and `display_name` are `null`. A platform admin whose organization or principal is deactivated is still `linked: true` with `organization: null`.
+- Organization object: `POST` returns `{"id","name","slug","active"}` exactly; `GET` and `PATCH` return the full object `{"id","name","slug","active","member_count"}` (as in the list). `member_count` counts all principals of the organization, including deactivated ones. Lists are capped at 1000 items (no pagination yet).
+- Member object: `email` is `null` and `invite_status` is `"accepted"` for principals provisioned by the local CLI (they have no invitation). `roles` are sorted. `PATCH` returns the full member object.
+- `PATCH` with no fields (or only `null`s) is `422 validation_failed`. Unknown fields are refused (422).
+- `POST .../resend-invite` takes no body (an empty `{}` JSON body is accepted and ignored) and returns `202 {}`. Additional errors: `404 not_found` for a member without an invitation (CLI principal), `409 invite_already_accepted`, `409 member_inactive`, `409 organization_inactive`.
+- `POST .../members` additional errors: `409 organization_inactive` (deactivated organization), `429 rate_limited` (per-account invite limit or Supabase rate limit; `Retry-After` set), `503 unavailable` (Supabase unreachable or not configured).
+- `409 idempotency_key_reused`: the same `Idempotency-Key` with a different actor, action or body in the same scope. Missing or malformed key: `400 bad_request`. A replay returns the current state of the resource with the original status code.
+- `401` with body `{"error":"insufficient_user_authentication"}` (and an RFC 9470 `WWW-Authenticate` challenge, `acr_values="aal2"`) when `VERINA_AUTH_ADMIN_REQUIRE_AAL2=true` and a platform admin presents an `aal1` token. Off by default. Clients that do not forward `WWW-Authenticate` should switch on the body `error` code.
+- `429 {"error":"rate_limited"}` with `Retry-After` on any `/v1` route after repeated authentication failures from one client address.
+- Errors are always `{"error": <code>}`; bodies, e-mail addresses and names are never echoed.
